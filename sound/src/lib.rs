@@ -179,7 +179,19 @@ pub struct Bank {
     pub bass: Option<bank::Sample>,
 }
 
-/// Charge `bell.*` et `chime.*` (wav, ogg, flac, mp3) du dossier ; un fichier illisible est simplement ignoré.
+/// Échantillons livrés avec EmuNest (voir `assets/CREDITS.md`) : utilisés quand l'utilisateur n'en dépose pas.
+pub fn embedded_bank() -> Bank {
+    let get = |b: &[u8]| bank::from_bytes(b.to_vec()).map_err(|e| tracing::warn!("échantillon embarqué : {e:#}")).ok();
+    Bank {
+        bell: get(include_bytes!("../assets/bell.wav")),
+        chime: get(include_bytes!("../assets/chime.wav")),
+        pad: get(include_bytes!("../assets/pad.wav")),
+        bass: bank::from_bytes_bass(include_bytes!("../assets/bass.wav").to_vec()).ok(),
+    }
+}
+
+/// Charge `bell`, `chime`, `pad` et `bass` (wav, ogg, flac, mp3) du dossier ; ce qui manque ou est illisible
+/// est remplacé par l'échantillon embarqué.
 pub fn load_bank(dir: &std::path::Path) -> Bank {
     let find_with = |stem: &str, load: fn(&std::path::Path) -> anyhow::Result<bank::Sample>| -> Option<bank::Sample> {
         std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
@@ -187,7 +199,9 @@ pub fn load_bank(dir: &std::path::Path) -> Bank {
         }).and_then(|p| load(&p).map_err(|e| tracing::warn!("échantillon ignoré : {e:#}")).ok())
     };
     let find = |stem: &str| find_with(stem, bank::load);
-    Bank { bell: find("bell"), chime: find("chime"), pad: find("pad"), bass: find_with("bass", bank::load_bass) }
+    let own = Bank { bell: find("bell"), chime: find("chime"), pad: find("pad"), bass: find_with("bass", bank::load_bass) };
+    let std = embedded_bank();
+    Bank { bell: own.bell.or(std.bell), chime: own.chime.or(std.chime), pad: own.pad.or(std.pad), bass: own.bass.or(std.bass) }
 }
 
 /// Une note : l'échantillon de l'utilisateur à la bonne hauteur s'il y en a un, sinon la synthèse.
@@ -404,9 +418,9 @@ pub fn init(enabled: bool, volume: f32, sounds_dir: Option<&std::path::Path>) ->
             }
         };
         let _ = ready_tx.send(true);
-        let bank = sounds_dir.as_deref().map(load_bank).unwrap_or_default();
+        let bank = sounds_dir.as_deref().map(load_bank).unwrap_or_else(embedded_bank);
         if bank.bell.is_some() || bank.chime.is_some() {
-            tracing::info!("sons : échantillons de l'utilisateur chargés");
+            tracing::info!("sons : échantillons chargés");
         }
         let buffers: HashMap<Sound, Vec<f32>> = render_all_with(&bank).into_iter().collect();
         let mut last: HashMap<Sound, Instant> = HashMap::new();

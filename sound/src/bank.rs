@@ -18,7 +18,12 @@ pub struct Sample {
 
 /// Comme `load`, avec la hauteur cherchée entre 25 et 150 Hz (basses, 808).
 pub fn load_bass(path: &Path) -> Result<Sample> {
-    let mut s = load(path)?;
+    from_bytes_bass(std::fs::read(path).with_context(|| format!("ouverture de {}", path.display()))?)
+}
+
+/// `load_bass` depuis des octets (échantillons embarqués).
+pub fn from_bytes_bass(bytes: Vec<u8>) -> Result<Sample> {
+    let mut s = from_bytes(bytes)?;
     (s.base_freq, s.confidence) = detect_pitch_in(&s.data, 25.0, 150.0);
     Ok(s)
 }
@@ -26,13 +31,17 @@ pub fn load_bass(path: &Path) -> Result<Sample> {
 /// Décode un fichier audio (wav, ogg, flac, mp3), le passe en mono 44,1 kHz, retire le silence du début
 /// et normalise le pic à 1. Limité à 4 s : on n'a besoin que de l'attaque et de la première résonance.
 pub fn load(path: &Path) -> Result<Sample> {
-    let file = std::fs::File::open(path).with_context(|| format!("ouverture de {}", path.display()))?;
-    let decoder = rodio::Decoder::try_from(file).with_context(|| format!("format audio non reconnu : {}", path.display()))?;
+    from_bytes(std::fs::read(path).with_context(|| format!("ouverture de {}", path.display()))?)
+}
+
+/// `load` depuis des octets (fichier audio complet : wav, ogg, flac, mp3).
+pub fn from_bytes(bytes: Vec<u8>) -> Result<Sample> {
+    let decoder = rodio::Decoder::try_from(std::io::Cursor::new(bytes)).context("format audio non reconnu")?;
     let channels = decoder.channels().get() as usize;
     let rate = decoder.sample_rate().get() as f32;
     let raw: Vec<f32> = decoder.collect();
     if raw.is_empty() {
-        bail!("fichier vide : {}", path.display());
+        bail!("fichier audio vide");
     }
     let mono: Vec<f32> = raw.chunks(channels).map(|c| c.iter().sum::<f32>() / channels as f32).collect();
 

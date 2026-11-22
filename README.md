@@ -65,10 +65,11 @@ Les données (bibliothèque, jaquettes, émulateurs installés) sont dans `~/.em
 
 ## Sons
 
-Par défaut, les sons de l'interface sont **synthétisés** : aucun fichier audio n'est livré avec EmuNest.
+EmuNest embarque quatre petits échantillons (cloche, carillon, nappe, basse) joués à la bonne hauteur pour construire
+les sons de l'interface ; leurs sources sont dans [`sound/assets/CREDITS.md`](sound/assets/CREDITS.md) et **ne sont pas
+couvertes par la licence MIT**. Sans eux (ou s'ils ne sont pas lisibles), les sons sont synthétisés.
 
-Pour un rendu plus naturel, tu peux déposer tes propres échantillons (wav, ogg, flac ou mp3) dans
-`~/.emunest/sounds/` ; ils sont joués à la bonne hauteur, quelle que soit leur note d'origine :
+Tu peux les remplacer par les tiens (wav, ogg, flac ou mp3) en les déposant dans `~/.emunest/sounds/` :
 
 | Fichier | Rôle |
 |---|---|
@@ -77,7 +78,7 @@ Pour un rendu plus naturel, tu peux déposer tes propres échantillons (wav, ogg
 | `pad.*` | nappe de l'intro et du lancement |
 | `bass.*` | basse douce (un 808, par exemple) |
 
-Chaque fichier est facultatif. Vérifie la licence des échantillons que tu utilises : EmuNest ne les copie nulle part.
+Chaque fichier est facultatif : ce qui manque reste celui d'origine.
 
 ## Développement
 
