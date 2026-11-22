@@ -208,6 +208,8 @@ pub fn pad_input(win: &MainWindow, input: Pad) {
     let input = match input {
         Pad::Up if win.get_dialog_mode() != 5 => Pad::Step(-1),
         Pad::Down if win.get_dialog_mode() != 5 => Pad::Step(1),
+        // le bouton Menu (☰ de la manette Xbox) ouvre les options comme Select ; dans un menu il valide
+        Pad::Start if win.get_dialog_mode() == 0 => Pad::Options,
         Pad::Start if win.get_dialog_mode() != 5 => Pad::Accept,
         other => other,
     };

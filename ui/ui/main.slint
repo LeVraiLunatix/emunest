@@ -370,6 +370,8 @@ export component MainWindow inherits Window {
     in-out property <bool> tv: false;
     // animation de démarrage : se ferme seule, ou à la première touche / au premier clic
     in-out property <bool> intro: false;
+    // vrai 0,6 s après le début de l'intro : avant, un évènement clavier parasite de Windows ne doit pas la couper
+    property <bool> intro-armed: false;
     // filtres (console / favoris / récents), recherche et menu Options
     in-out property <[string]> filters;
     in-out property <int> filter-index: 0;
@@ -1138,9 +1140,12 @@ export component MainWindow inherits Window {
 
     // ---------- Animation de démarrage ----------
     if root.intro: iv := Rectangle {
-        property <float> t: 0;
-        init => { self.t = 1; }
+        // l'animation démarre une fois la première image affichée (sinon la valeur finale est prise d'un coup)
+        property <bool> go: false;
+        property <float> t: self.go ? 1 : 0;
         animate t { duration: 4200ms; easing: linear; }
+        Timer { interval: 80ms; running: !iv.go; triggered => { iv.go = true; } }
+        Timer { interval: 600ms; running: !root.intro-armed; triggered => { root.intro-armed = true; } }
         // courbes douces (smoothstep) calées sur le son d'intro
         property <float> p-logo: clamp(self.t / 0.30, 0, 1);
         property <float> e-logo: self.p-logo * self.p-logo * (3 - 2 * self.p-logo);
@@ -1228,7 +1233,8 @@ export component MainWindow inherits Window {
     fs := FocusScope {
         init => { self.focus(); }
         key-pressed(e) => {
-            if (root.intro) { root.intro = false; return accept; }
+            // Windows envoie un évènement clavier parasite au démarrage : il ne doit pas couper l'intro (on attend 0,6 s)
+            if (root.intro) { if (root.intro-armed) { root.intro = false; } return accept; }
             if (root.dialog-mode != 0) {
                 if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Return) { root.dialog-accept(); }
                 else if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Escape) { root.dialog-cancel(); }
