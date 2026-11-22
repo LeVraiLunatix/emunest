@@ -153,7 +153,7 @@ impl Sample {
                 let t = i as f32 / SR as f32;
                 let att = (t / attack.max(0.001)).min(1.0);
                 let env = att * att * (3.0 - 2.0 * att) * (-t / decay).exp();
-                let tail = ((total - i) as f32 / (0.03 * SR as f32)).min(1.0);
+                let tail = ((total - i) as f32 / ((secs * 0.25).clamp(0.03, 0.5) * SR as f32)).min(1.0);
                 (a + (b - a) * frac) * env * tail * amp
             })
             .collect()

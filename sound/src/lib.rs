@@ -337,14 +337,17 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
             ),
             0.28,
         ),
-        // intro, tout en Do : basse, nappe, puis deux notes (Do, Sol)
+        // intro, tout en Do : basse, nappe, basse douce, nappe, arpège de bells Do-Mi-Sol-Do
         Intro => finish(
             reverb(
                 mix(vec![
-                    (0, match &bank.bass { Some(b) => b.note(65.41, 4.2, 0.02, 1.6, 1.0), None => pad(65.41, 4.2, 1.3, 1.4, 0.9) }),
-                    (0, pad(130.81, 4.2, 1.2, 1.5, 0.8)),
-                    (1300, tone(523.25, 1.8, 0.05, 0.60, PURE, 0.0, 0.5)),
-                    (1800, tone(783.99, 2.0, 0.05, 0.70, PURE, 0.0, 0.5)),
+                    (0, match &bank.bass { Some(b) => b.note(65.41, 4.2, 0.30, 1.3, 0.55), None => pad(65.41, 4.2, 1.3, 1.4, 0.9) }),
+                    (0, pad(130.81, 3.9, 1.0, 1.0, 0.8)),
+                    (900, tone(523.25, 1.6, 0.04, 0.55, PURE, 0.0, 0.42)),
+                    (1250, tone(659.25, 1.6, 0.04, 0.55, PURE, 0.0, 0.40)),
+                    (1600, tone(783.99, 1.8, 0.04, 0.60, PURE, 0.0, 0.42)),
+                    (2000, tone(1046.5, 2.0, 0.04, 0.70, PURE, 0.0, 0.40)),
+                    (2500, tone(783.99, 1.6, 0.04, 0.60, PURE, 0.0, 0.30)),
                 ]),
                 0.65,
                 1.0,
