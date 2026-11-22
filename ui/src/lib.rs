@@ -253,7 +253,10 @@ pub fn pad_input(win: &MainWindow, input: Pad) {
         }
     }
     match input {
-        Pad::Step(d) if n > 0 => win.set_selected((win.get_current() + d).clamp(0, n - 1)),
+        Pad::Step(d) if n > 0 => {
+            let cur = win.get_current();
+            win.set_selected(if win.get_loops() { (cur + d).rem_euclid(n) } else { (cur + d).clamp(0, n - 1) })
+        }
         Pad::Accept if n > 0 => win.invoke_launch(win.get_current()),
         Pad::Back => win.set_toast("".into()),
         Pad::Filter(d) => step_filter(win, d),
