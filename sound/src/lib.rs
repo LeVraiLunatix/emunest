@@ -561,4 +561,14 @@ mod tests {
         assert_eq!(bytes.len(), 44 + render(Sound::Select).len() * 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn embedded_samples_load_with_a_sane_pitch() {
+        let b = embedded_bank();
+        for (name, s) in [("bell", &b.bell), ("chime", &b.chime), ("pad", &b.pad), ("bass", &b.bass)] {
+            let s = s.as_ref().unwrap_or_else(|| panic!("{name} embarqué illisible"));
+            assert!(s.base_freq > 25.0 && s.base_freq < 2100.0, "{name} : hauteur {} Hz", s.base_freq);
+        }
+        assert!(render_all_with(&b).iter().all(|(_, v)| v.iter().all(|x| x.is_finite())));
+    }
 }
