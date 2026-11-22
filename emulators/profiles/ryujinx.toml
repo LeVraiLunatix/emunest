@@ -4,3 +4,5 @@ extensions = ["nsp", "xci"]
 source = { type = "manual" }
 executable = "Ryujinx.exe"
 launch_args = ["-f", "{rom}"]
+save_dirs = ["portable\\bis\\user\\save"]
+alt_save_dirs = ['%APPDATA%\Ryujinx\bis\user\save']

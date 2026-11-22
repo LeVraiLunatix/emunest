@@ -1,8 +1,10 @@
 name: Release
-# Publie un zip portable de l'exécutable à chaque étiquette vX.Y.Z
+# Étiquette vX.Y.Z : publie un zip portable + l'installeur. Lancement manuel : construit les mêmes fichiers
+# en artefacts (sans publier) pour vérifier l'installeur.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,14 +17,38 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p emunest
-      - name: Archive
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v\d') { $tag = "v0.0.0-dev" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($tag.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+      - name: Zip portable
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item target/release/emunest.exe dist/
           Copy-Item README.md dist/
-          Compress-Archive -Path dist/* -DestinationPath "EmuNest-${{ github.ref_name }}-windows-x64.zip"
-      - uses: softprops/action-gh-release@v2
+          Compress-Archive -Path dist/* -DestinationPath "EmuNest-${{ steps.ver.outputs.tag }}-windows-x64.zip"
+      - name: Installeur (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" installer\emunest.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
         with:
-          files: EmuNest-*.zip
+          name: emunest-windows
+          path: |
+            EmuNest-*.zip
+            installer/Output/EmuNest-Setup-*.exe
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            EmuNest-*.zip
+            installer/Output/EmuNest-Setup-*.exe
           generate_release_notes: true

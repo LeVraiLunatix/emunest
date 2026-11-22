@@ -4,3 +4,5 @@ extensions = ["iso", "cso", "pbp"]
 source = { type = "github", repo = "hrydgard/ppsspp" }
 executable = "PPSSPPWindows64.exe"
 launch_args = ["{rom}", "--fullscreen"]
+save_dirs = ["memstick\\PSP\\SAVEDATA", "memstick\\PSP\\PPSSPP_STATE"]
+alt_save_dirs = []

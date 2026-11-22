@@ -6,6 +6,9 @@ executable = "duckstation-qt-x64-ReleaseLTCG.exe"
 launch_args = ["-batch", "-fullscreen", "--", "{rom}"]
 portable = true
 
+save_dirs = ["memcards", "savestates"]
+alt_save_dirs = ['%USERPROFILE%\Documents\DuckStation\memcards', '%USERPROFILE%\Documents\DuckStation\savestates']
+
 [[requires]]
 label = "BIOS PlayStation"
 dir = "bios"

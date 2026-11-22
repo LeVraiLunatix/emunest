@@ -14,6 +14,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type Ui = Weak<MainWindow>;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn toast(ui: &Ui, msg: impl Into<String>) {
     let msg = msg.into();
     let _ = ui.upgrade_in_event_loop(move |w| emunest_ui::toast(&w, &msg));
@@ -199,6 +201,14 @@ fn play(data: &Path, ui: &Ui, game: Game) {
         let _ = lib.record_play(&game.path, played.as_secs() as i64);
     }
     reload(data, ui);
+    let cfg = config::load(data);
+    if cfg.auto_backup {
+        match emunest_core::backup::backup_emulator(&exe, &profile, &cfg.backup_dir(data)) {
+            Ok(Some(_)) => toast(ui, format!("Sauvegardes de {} copiées", profile.name)),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("sauvegarde automatique : {e:#}"),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -225,6 +235,11 @@ enum Sub {
     InstallEmulator(String),
     OpenData,
     OpenConfig,
+    CheckUpdate,
+    BackupNow,
+    ToggleAutoBackup,
+    SetBackupDir,
+    OpenBackupDir,
 }
 
 static SUB: Mutex<Vec<Sub>> = Mutex::new(Vec::new());
@@ -296,6 +311,11 @@ fn show_settings(data: &Path, ui: &Ui) {
         vec![
             (Sub::RomFolders, format!("Dossiers de ROMs ({})…", cfg.roms.len())),
             (Sub::Emulators, "Émulateurs…".into()),
+            (Sub::BackupNow, "Sauvegarder les sauvegardes de jeu maintenant".into()),
+            (Sub::ToggleAutoBackup, format!("Sauvegarde automatique après chaque partie : {}", if cfg.auto_backup { "oui" } else { "non" })),
+            (Sub::SetBackupDir, format!("Dossier des sauvegardes : {}…", cfg.backup_dir(data).display())),
+            (Sub::OpenBackupDir, "Ouvrir le dossier des sauvegardes".into()),
+            (Sub::CheckUpdate, format!("Rechercher une mise à jour d'EmuNest (v{VERSION})")),
             (Sub::OpenData, "Ouvrir le dossier de données".into()),
             (Sub::OpenConfig, "Ouvrir config.toml".into()),
         ],
@@ -340,6 +360,53 @@ fn update_emulator(data: &Path, ui: &Ui, profile: &Profile) {
     match run_install(data, ui, profile) {
         Ok(_) => toast(ui, format!("{} est à jour", profile.name)),
         Err(e) => toast(ui, format!("Mise à jour de {} impossible : {e:#}", profile.name)),
+    }
+}
+
+/// Cherche une nouvelle version d'EmuNest ; `manual` = demandé par l'utilisateur (sinon silencieux sauf nouveauté).
+fn check_update(data: &Path, ui: &Ui, manual: bool) {
+    let token = config::load(data).github_token;
+    let release = match emunest_core::update::check(VERSION, token.as_deref()) {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            if manual {
+                toast(ui, format!("EmuNest est à jour (v{VERSION})"));
+            }
+            return;
+        }
+        Err(e) => {
+            tracing::info!("mise à jour : {e:#}");
+            if manual {
+                toast(ui, format!("Recherche impossible : {e:#}"));
+            }
+            return;
+        }
+    };
+    if !manual {
+        return toast(ui, format!("EmuNest v{} est disponible : Réglages › Rechercher une mise à jour", release.version));
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let title = format!("EmuNest v{} est disponible", release.version);
+    let _ = ui.upgrade_in_event_loop(move |w| {
+        emunest_ui::ask(&w, &title, "Télécharger et installer la mise à jour ? EmuNest va redémarrer.", false, tx)
+    });
+    if rx.recv() != Ok(Answer::Yes) {
+        return;
+    }
+    let title = format!("Mise à jour vers v{}", release.version);
+    let result = emunest_core::update::apply(&release, token.as_deref(), &mut |f| {
+        let (title, text) = (title.clone(), format!("Téléchargement… {} %", (f * 100.0) as u32));
+        let _ = ui.upgrade_in_event_loop(move |w| emunest_ui::show_progress(&w, &title, &text, f));
+    });
+    match result {
+        Ok(exe) => {
+            let _ = std::process::Command::new(&exe).spawn(); // la nouvelle version démarre pendant que celle-ci se ferme
+            let _ = ui.upgrade_in_event_loop(|_| emunest_ui::quit());
+        }
+        Err(e) => {
+            let _ = ui.upgrade_in_event_loop(|w| emunest_ui::close_dialog(&w));
+            toast(ui, format!("Mise à jour impossible : {e:#}"));
+        }
     }
 }
 
@@ -464,6 +531,34 @@ fn handle_sub(data: &Path, ui: &Ui, sub: Sub, game: Option<Game>, cli: &Option<P
                 update_emulator(data, ui, &p);
             }
         }
+        Sub::CheckUpdate => check_update(data, ui, true),
+        Sub::BackupNow => {
+            toast(ui, "Sauvegarde des saves en cours…");
+            let dest = config::load(data).backup_dir(data);
+            match emunest_core::backup::backup_all(data, &dest) {
+                Ok((made, _)) if made.is_empty() => toast(ui, "Aucune sauvegarde de jeu trouvée chez les émulateurs installés"),
+                Ok((made, _)) => toast(ui, format!("{} sauvegarde(s) copiée(s) dans {}", made.len(), dest.display())),
+                Err(e) => toast(ui, format!("Sauvegarde impossible : {e:#}")),
+            }
+        }
+        Sub::ToggleAutoBackup => {
+            let mut cfg = config::load(data);
+            cfg.auto_backup = !cfg.auto_backup;
+            log_err(config::save(data, &cfg));
+            toast(ui, if cfg.auto_backup { "Sauvegarde automatique activée" } else { "Sauvegarde automatique désactivée" });
+        }
+        Sub::SetBackupDir => {
+            let Some(dir) = rfd::FileDialog::new().set_title("Dossier des sauvegardes (un dossier OneDrive/Dropbox = copie dans le cloud)").pick_folder() else { return };
+            let mut cfg = config::load(data);
+            cfg.backup_dir = Some(dir.clone());
+            log_err(config::save(data, &cfg));
+            toast(ui, format!("Sauvegardes dans {}", dir.display()));
+        }
+        Sub::OpenBackupDir => {
+            let dir = config::load(data).backup_dir(data);
+            let _ = std::fs::create_dir_all(&dir);
+            open_with_default(&dir);
+        }
         Sub::OpenData => open_with_default(data),
         Sub::OpenConfig => {
             let path = data.join("config.toml");
@@ -563,6 +658,9 @@ fn main() -> Result<()> {
     }
 
     let data = data_dir();
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::fs::remove_file(exe.with_extension("old")); // reste d'une mise à jour précédente
+    }
     let win = emunest_ui::create(!windowed)?;
     if let Some(kind) = forced_pad {
         emunest_ui::set_pad_kind(&win, kind);
@@ -614,7 +712,8 @@ fn main() -> Result<()> {
 
     // Tout le travail lent (scan, réseau) hors du thread UI : la fenêtre s'affiche tout de suite.
     std::thread::spawn(move || {
-        reload(&data, &weak); // la bibliothèque déjà connue s'affiche sans attendre le scan
+        reload(&data, &weak);
+        check_update(&data, &weak, false); // la bibliothèque déjà connue s'affiche sans attendre le scan
         let dirs = rom_dirs(&data, &roms);
         if dirs.is_empty() {
             if let Ok(games) = db(&data).and_then(|l| l.games()) {

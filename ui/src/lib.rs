@@ -227,6 +227,11 @@ pub fn close_dialog(win: &MainWindow) {
     win.set_dialog_mode(0);
 }
 
+/// Ferme l'application. Thread UI.
+pub fn quit() {
+    let _ = slint::quit_event_loop();
+}
+
 /// Message passager en bas de l'écran (6 s).
 pub fn toast(win: &MainWindow, msg: &str) {
     win.set_toast(msg.into());

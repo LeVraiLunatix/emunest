@@ -6,6 +6,9 @@ executable = "pcsx2-qt.exe"
 launch_args = ["-batch", "-fullscreen", "--", "{rom}"]
 portable = true
 
+save_dirs = ["memcards", "sstates"]
+alt_save_dirs = ['%USERPROFILE%\Documents\PCSX2\memcards', '%USERPROFILE%\Documents\PCSX2\sstates']
+
 [[requires]]
 label = "BIOS PlayStation 2"
 dir = "bios"

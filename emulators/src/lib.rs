@@ -46,6 +46,12 @@ pub struct Profile {
     pub portable: bool,
     #[serde(default)]
     pub requires: Vec<Requirement>,
+    /// dossiers de sauvegardes (relatifs au dossier de l'exécutable) à sauvegarder en mode portable
+    #[serde(default)]
+    pub save_dirs: Vec<String>,
+    /// dossiers de sauvegardes hors mode portable (variables %NOM% acceptées)
+    #[serde(default)]
+    pub alt_save_dirs: Vec<String>,
 }
 
 const BUILTIN: &[&str] = &[

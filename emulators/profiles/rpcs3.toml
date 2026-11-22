@@ -4,3 +4,5 @@ extensions = ["iso", "pkg"]
 source = { type = "github", repo = "RPCS3/rpcs3-binaries-win" }
 executable = "rpcs3.exe"
 launch_args = ["--no-gui", "{rom}"]
+save_dirs = ["dev_hdd0\\home\\00000001\\savedata"]
+alt_save_dirs = []

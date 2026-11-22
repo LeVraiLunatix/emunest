@@ -32,7 +32,7 @@ pub(crate) fn find_in(dir: &Path, name: &str) -> Option<PathBuf> {
 }
 
 /// Remplace les %VARIABLES% d'environnement d'un chemin.
-fn expand(path: &str) -> PathBuf {
+pub(crate) fn expand(path: &str) -> PathBuf {
     let mut out = String::new();
     let mut parts = path.split('%');
     out.push_str(parts.next().unwrap_or_default());
@@ -148,6 +148,8 @@ mod tests {
             launch_args: ["/C", "if", "exist", "{rom}", "(exit", "7)"].map(String::from).to_vec(),
             portable: false,
             requires: vec![],
+            save_dirs: vec![],
+            alt_save_dirs: vec![],
         };
         let exe = PathBuf::from(std::env::var("COMSPEC").unwrap());
         let status = launch(&exe, &profile, &rom, "").unwrap().wait().unwrap();

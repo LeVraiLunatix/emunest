@@ -1,7 +1,9 @@
 //! Modèles, scan des ROMs et bibliothèque SQLite.
+pub mod backup;
 pub mod config;
 pub mod install;
 pub mod launch;
+pub mod update;
 
 use anyhow::{Context, Result};
 use emunest_emulators::Profile;
