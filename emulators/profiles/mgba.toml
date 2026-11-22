@@ -1,0 +1,6 @@
+name = "mGBA"
+platforms = ["gba", "gbc", "gb"]
+extensions = ["gba", "gbc", "gb"]
+source = { type = "github", repo = "mgba-emu/mgba" }
+executable = "mGBA.exe"
+launch_args = ["-f", "{rom}"]

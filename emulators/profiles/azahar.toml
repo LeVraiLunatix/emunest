@@ -1,0 +1,6 @@
+name = "Azahar"
+platforms = ["3ds"]
+extensions = ["3ds", "cci", "cxi", "cia"]
+source = { type = "github", repo = "azahar-emu/azahar" }
+executable = "azahar.exe"
+launch_args = ["-f", "{rom}"]

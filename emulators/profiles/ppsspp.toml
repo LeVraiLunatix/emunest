@@ -1,0 +1,6 @@
+name = "PPSSPP"
+platforms = ["psp"]
+extensions = ["iso", "cso", "pbp"]
+source = { type = "github", repo = "hrydgard/ppsspp" }
+executable = "PPSSPPWindows64.exe"
+launch_args = ["{rom}", "--fullscreen"]

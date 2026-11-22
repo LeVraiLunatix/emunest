@@ -1,0 +1,1013 @@
+export struct GameItem {
+    title: string,
+    platform: string,
+    emulator: string,
+    initial: string,
+    seed: int,
+    aspect: float,
+    favorite: bool,
+    stats: string,
+    path: string,
+    has-cover: bool,
+    cover: image,
+    bg: image,
+    p1: color,
+    p2: color,
+    p3: color,
+    color: color,
+    color2: color,
+}
+
+// Échelle de l'interface : toutes les longueurs sont dessinées pour 1920x1080 puis multipliées par k
+// (k = taille réelle de la fenêtre / 1920x1080). Le texte est ainsi rasterisé à sa vraie taille : net.
+global Scale {
+    in-out property <float> k: 1;
+}
+
+// Verre "liquide" : reflet spéculaire en haut, bord dégradé, fond translucide, ombre douce.
+component Glass inherits Rectangle {
+    background: @linear-gradient(180deg, #ffffff26 0%, #ffffff0c 55%, #ffffff14 100%);
+    border-width: (1px * Scale.k);
+    border-color: @linear-gradient(180deg, #ffffff66 0%, #ffffff14 50%, #ffffff30 100%);
+    drop-shadow-blur: (36px * Scale.k);
+    drop-shadow-color: #00000080;
+    drop-shadow-offset-y: (12px * Scale.k);
+    Rectangle {
+        x: root.border-radius * 0.7;
+        y: (1px * Scale.k);
+        width: parent.width - root.border-radius * 1.4;
+        height: (1px * Scale.k);
+        background: @linear-gradient(90deg, #ffffff00, #ffffffb0 50%, #ffffff00);
+    }
+    @children
+}
+
+// Bouton rond façon macOS : le symbole apparaît au survol.
+component Light inherits Rectangle {
+    in property <color> tint;
+    in property <string> glyph;
+    callback clicked();
+    width: (26px * Scale.k);
+    height: (26px * Scale.k);
+    border-radius: (13px * Scale.k);
+    background: ta.has-hover ? tint.brighter(0.15) : tint;
+    border-width: (1px * Scale.k);
+    border-color: #00000030;
+    animate background { duration: 120ms; }
+    Text {
+        text: root.glyph;
+        color: #00000099;
+        font-size: (19px * Scale.k);
+        font-weight: 800;
+        opacity: ta.has-hover ? 1.0 : 0.0;
+        animate opacity { duration: 120ms; }
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Poignée de bord : déclenche le redimensionnement natif depuis ce bord.
+component Grip inherits TouchArea {
+    in property <int> code;
+    callback grab(int);
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.grab(root.code); }
+    }
+}
+
+// ---------- Icônes de manette dessinées (pas de glyphes de police) ----------
+
+// Bouton rond de la face avant. kind : 0 = Xbox / générique, 1 = PlayStation, 2 = Nintendo.
+component FaceButton inherits Rectangle {
+    in property <int> kind;
+    in property <string> pos; // south | east | west | north
+    property <string> letter: kind == 2
+        ? (pos == "south" ? "B" : pos == "east" ? "A" : pos == "west" ? "Y" : "X")
+        : (pos == "south" ? "A" : pos == "east" ? "B" : pos == "west" ? "X" : "Y");
+    property <color> tint: kind == 0
+        ? (pos == "south" ? #43a047 : pos == "east" ? #e53935 : pos == "west" ? #1e88e5 : #fbc02d)
+        : (pos == "south" ? #7cb4ff : pos == "east" ? #ff7a85 : pos == "west" ? #f19ad6 : #6fe0b0);
+    width: (44px * Scale.k);
+    height: (44px * Scale.k);
+    border-radius: (22px * Scale.k);
+    background: kind == 0 ? tint : #1d2336;
+    border-width: kind == 0 ? (0px * Scale.k) : (2px * Scale.k);
+    border-color: kind == 1 ? tint : #5b647d;
+    drop-shadow-blur: (6px * Scale.k);
+    drop-shadow-color: #00000066;
+    if kind != 1: Text { text: root.letter; color: #ffffff; font-size: (25px * Scale.k); font-weight: 800; }
+    if kind == 1 && pos == "south": Path {
+        width: (22px * Scale.k);
+        height: (22px * Scale.k);
+        viewbox-width: 22;
+        viewbox-height: 22;
+        commands: "M 3 3 L 19 19 M 19 3 L 3 19";
+        stroke: root.tint;
+        stroke-width: (3.2px * Scale.k);
+        stroke-line-cap: round;
+    }
+    if kind == 1 && pos == "east": Rectangle {
+        width: (22px * Scale.k);
+        height: (22px * Scale.k);
+        border-radius: (11px * Scale.k);
+        border-width: (3.2px * Scale.k);
+        border-color: root.tint;
+    }
+    if kind == 1 && pos == "west": Rectangle {
+        width: (20px * Scale.k);
+        height: (20px * Scale.k);
+        border-radius: (2px * Scale.k);
+        border-width: (3.2px * Scale.k);
+        border-color: root.tint;
+    }
+    if kind == 1 && pos == "north": Path {
+        width: (24px * Scale.k);
+        height: (22px * Scale.k);
+        viewbox-width: 24;
+        viewbox-height: 22;
+        commands: "M 12 2 L 22 20 L 2 20 Z";
+        stroke: root.tint;
+        stroke-width: (3.2px * Scale.k);
+        stroke-line-join: round;
+        fill: transparent;
+    }
+}
+
+// Gâchette d'épaule (LB / L1 / L …).
+component Bumper inherits Rectangle {
+    in property <string> label;
+    width: (64px * Scale.k);
+    height: (34px * Scale.k);
+    border-radius: (12px * Scale.k);
+    background: #1d2336;
+    border-width: (2px * Scale.k);
+    border-color: #6b748d;
+    Text { text: root.label; color: #ffffff; font-size: (20px * Scale.k); font-weight: 800; }
+}
+
+// Croix directionnelle.
+component DPad inherits Rectangle {
+    width: (44px * Scale.k);
+    height: (44px * Scale.k);
+    Rectangle { x: (15px * Scale.k); width: (14px * Scale.k); height: (44px * Scale.k); border-radius: (4px * Scale.k); background: #e6ebf7; }
+    Rectangle { y: (15px * Scale.k); width: (44px * Scale.k); height: (14px * Scale.k); border-radius: (4px * Scale.k); background: #e6ebf7; }
+    Rectangle { x: (18px * Scale.k); y: (18px * Scale.k); width: (8px * Scale.k); height: (8px * Scale.k); border-radius: (4px * Scale.k); background: #9aa4bd; }
+}
+
+// Bouton Select / View : trois traits dans un carré arrondi.
+component OptionsIcon inherits Rectangle {
+    width: (44px * Scale.k);
+    height: (44px * Scale.k);
+    border-radius: (12px * Scale.k);
+    background: #1d2336;
+    border-width: (2px * Scale.k);
+    border-color: #6b748d;
+    Path {
+        width: (24px * Scale.k);
+        height: (20px * Scale.k);
+        viewbox-width: 24;
+        viewbox-height: 20;
+        commands: "M 2 3 L 22 3 M 2 10 L 22 10 M 2 17 L 22 17";
+        stroke: #e6ebf7;
+        stroke-width: (3px * Scale.k);
+        stroke-line-cap: round;
+    }
+}
+
+// Un conseil avec l'icône de la manette détectée : role = dpad | shoulders | confirm | back | extra.
+component PadHint inherits Rectangle {
+    in property <string> role;
+    in property <int> kind;
+    in property <string> label;
+    property <length> icon-w: role == "shoulders" ? (136px * Scale.k) : (44px * Scale.k);
+    width: icon-w + (18px * Scale.k) + lbl.preferred-width;
+    height: (52px * Scale.k);
+    if role == "dpad": DPad { x: 0; y: (4px * Scale.k); }
+    if role == "shoulders": Bumper { x: 0; y: (9px * Scale.k); label: kind == 1 ? "L1" : kind == 2 ? "L" : "LB"; }
+    if role == "shoulders": Bumper { x: (72px * Scale.k); y: (9px * Scale.k); label: kind == 1 ? "R1" : kind == 2 ? "R" : "RB"; }
+    if role == "confirm": FaceButton { x: 0; y: (4px * Scale.k); kind: root.kind; pos: root.kind == 2 ? "east" : "south"; }
+    if role == "back": FaceButton { x: 0; y: (4px * Scale.k); kind: root.kind; pos: root.kind == 2 ? "south" : "east"; }
+    if role == "options": OptionsIcon { x: 0; y: (4px * Scale.k); }
+    if role == "extra": FaceButton { x: 0; y: (4px * Scale.k); kind: root.kind; pos: "west"; }
+    lbl := Text {
+        x: root.icon-w + (18px * Scale.k);
+        text: root.label;
+        color: #b4bccd;
+        font-size: (27px * Scale.k);
+        vertical-alignment: center;
+        height: (52px * Scale.k);
+    }
+}
+
+component KeyHint inherits Rectangle {
+    in property <string> key;
+    in property <string> label;
+    width: cap.width + (18px * Scale.k) + lbl.preferred-width;
+    height: (52px * Scale.k);
+    cap := Rectangle {
+        x: 0;
+        y: (4px * Scale.k);
+        width: max((52px * Scale.k), kt.preferred-width + (32px * Scale.k));
+        height: (44px * Scale.k);
+        border-radius: (13px * Scale.k);
+        background: @linear-gradient(180deg, #ffffff30, #ffffff10);
+        border-width: (1px * Scale.k);
+        border-color: #ffffff40;
+        kt := Text { text: root.key; color: #f4f6fb; font-size: (24px * Scale.k); font-weight: 700; }
+    }
+    lbl := Text {
+        x: cap.width + (18px * Scale.k);
+        text: root.label;
+        color: #b4bccd;
+        font-size: (27px * Scale.k);
+        vertical-alignment: center;
+        height: (52px * Scale.k);
+    }
+}
+
+// Jaquette générée : motif unique par jeu (dérivé du titre), bandeau plateforme, titre en gros.
+// Tout est proportionnel à la largeur : la jaquette grossit sans rien casser.
+component Cover inherits Rectangle {
+    in property <GameItem> g;
+    in property <float> sheen: 0;
+    background: @linear-gradient(155deg, g.color 0%, g.color2 100%);
+    clip: true;
+
+    if !g.has-cover: Rectangle {
+        // soleil / planète
+        Rectangle {
+            x: root.width * (0.02 + mod(g.seed, 45) / 100);
+            y: root.height * (0.04 + mod(g.seed / 7, 22) / 100);
+            width: root.width * 0.95;
+            height: self.width;
+            border-radius: self.width / 2;
+            background: @radial-gradient(circle, #ffffff66 0%, #ffffff00 68%);
+        }
+        Rectangle {
+            x: root.width * (0.25 + mod(g.seed / 3, 40) / 100);
+            y: root.height * (0.10 + mod(g.seed / 11, 18) / 100);
+            width: root.width * 0.5;
+            height: self.width;
+            border-radius: self.width / 2;
+            background: @linear-gradient(180deg, g.color.brighter(0.7).with-alpha(0.55), g.color2.with-alpha(0.0));
+        }
+        // bandes diagonales
+        Rectangle {
+            x: -root.width * 0.3;
+            y: root.height * (0.18 + mod(g.seed / 5, 30) / 100);
+            width: root.width * 1.6;
+            height: root.width * 0.16;
+            transform-rotation: -24deg;
+            background: #ffffff1c;
+        }
+        Rectangle {
+            x: -root.width * 0.3;
+            y: root.height * (0.34 + mod(g.seed / 13, 20) / 100);
+            width: root.width * 1.6;
+            height: root.width * 0.05;
+            transform-rotation: -24deg;
+            background: #ffffff30;
+        }
+        // initiale géante en filigrane
+        Text {
+            y: -root.height * 0.04;
+            text: g.initial;
+            color: #ffffff22;
+            font-size: root.width * 0.9;
+            font-weight: 900;
+        }
+        // voile pour la lisibilité du titre
+        Rectangle {
+            y: root.height * 0.45;
+            height: root.height * 0.55;
+            background: @linear-gradient(180deg, #00000000 0%, #000000d0 100%);
+            border-radius: (26px * Scale.k);
+        }
+        // bandeau plateforme (comme le haut d'un boîtier)
+        Rectangle {
+            y: (26px * Scale.k);
+            height: root.height * 0.075;
+            background: #000000b8;
+            Rectangle {
+                x: root.width * 0.07;
+                y: (parent.height - self.height) / 2;
+                width: root.width * 0.035;
+                height: self.width;
+                border-radius: self.width / 2;
+                background: g.color.brighter(0.8);
+            }
+            Text {
+                x: root.width * 0.14;
+                width: root.width * 0.8;
+                text: g.platform;
+                color: #ffffffd8;
+                font-size: root.width * 0.058;
+                font-weight: 700;
+                letter-spacing: root.width * 0.006;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+        // titre sur la jaquette
+        Text {
+            x: root.width * 0.09;
+            y: root.height * 0.60;
+            width: root.width * 0.82;
+            height: root.height * 0.34;
+            text: g.title;
+            wrap: word-wrap;
+            overflow: elide;
+            color: #ffffff;
+            font-size: root.width * 0.125;
+            font-weight: 900;
+            vertical-alignment: bottom;
+        }
+    }
+    if g.has-cover: Image {
+        source: g.cover;
+        width: root.width;
+        height: root.height;
+        image-fit: fill;
+    }
+    // reflet de verre
+    Rectangle {
+        x: 0;
+        width: root.width;
+        height: root.height * 0.42;
+        border-radius: (26px * Scale.k);
+        background: @linear-gradient(180deg, #ffffff30 0%, #ffffff00 100%);
+    }
+    // pli du boîtier à gauche (jaquettes générées seulement)
+    if !g.has-cover: Rectangle {
+        y: (26px * Scale.k);
+        height: root.height - (52px * Scale.k);
+        width: root.width * 0.05;
+        background: @linear-gradient(90deg, #00000066 0%, #ffffff24 55%, #00000000 100%);
+    }
+    // éclat qui balaie la jaquette à la sélection
+    Rectangle {
+        x: root.width * (-0.7 + sheen * 2.2);
+        y: -root.height * 0.3;
+        width: root.width * 0.38;
+        height: root.height * 1.6;
+        transform-rotation: 18deg;
+        opacity: sheen > 0.02 && sheen < 0.98 ? 1.0 : 0.0;
+        background: @linear-gradient(90deg, #ffffff00 0%, #ffffff66 50%, #ffffff00 100%);
+    }
+}
+
+export component MainWindow inherits Window {
+    in property <[GameItem]> games;
+    in property <string> status;
+    callback quit();
+    callback minimize();
+    callback toggle-fullscreen();
+    callback resize-edge(int);
+    callback move-window();
+    // vrai en mode fenêtre : poignées de redimensionnement et zone de déplacement actives
+    in-out property <bool> windowed: false;
+    // filtres (console / favoris / récents), recherche et menu Options
+    in-out property <[string]> filters;
+    in-out property <int> filter-index: 0;
+    in-out property <string> search;
+    in-out property <bool> searching: false;
+    in-out property <[string]> menu-items;
+    in-out property <int> menu-index: 0;
+    callback key-action(string) -> bool;
+    callback menu-activate(int);
+    init => { Scale.k = min(root.width / 1920px, root.height / 1080px); }
+    changed width => { Scale.k = min(root.width / 1920px, root.height / 1080px); }
+    changed height => { Scale.k = min(root.width / 1920px, root.height / 1080px); }
+    callback launch(int);
+    in-out property <string> toast;
+    // fenêtre modale : 0 = aucune, 1 = question (installer ?), 2 = progression
+    in-out property <int> dialog-mode: 0;
+    in-out property <string> dialog-title;
+    in-out property <string> dialog-text;
+    in-out property <float> progress: 0;
+    callback dialog-accept();
+    callback dialog-cancel();
+    callback dialog-extra();
+
+    title: "EmuNest";
+    no-frame: true;
+    icon: @image-url("logo.png");
+    default-font-family: "Segoe UI";
+    background: #07080d;
+    preferred-width: 1440px;
+    preferred-height: 810px;
+
+    in-out property <int> selected: 0;
+    out property <int> current: sel;
+    // vrai dès qu'une manette est utilisée : l'aide en bas passe aux boutons de la manette
+    in-out property <bool> pad-active: false;
+    // famille de la manette détectée : 0 = Xbox / générique, 1 = PlayStation, 2 = Nintendo
+    in-out property <int> pad-kind: 0;
+    property <int> sel: max(0, min(selected, games.length - 1));
+    property <length> pad: (120px * Scale.k);
+    property <length> tw: (210px * Scale.k);
+    property <length> th: (294px * Scale.k);
+    property <length> sw: (300px * Scale.k);
+    property <length> sh: (420px * Scale.k);
+    property <length> gap: (30px * Scale.k);
+    // couleurs de l'ambiance = couleurs dominantes de la jaquette sélectionnée
+    property <color> accent: games.length > 0 ? games[sel].p1.brighter(0.2) : #6b8cff;
+    property <color> accent2: games.length > 0 ? games[sel].p2.brighter(0.2) : #8a5bff;
+    property <color> accent3: games.length > 0 ? games[sel].p3.brighter(0.2) : #4cc9f0;
+    property <bool> drift: false;
+    property <bool> flip: false;
+    property <bool> pulse: false;
+    property <bool> kb: false;
+    animate accent, accent2, accent3 { duration: 800ms; easing: ease-in-out; }
+
+    Timer {
+        interval: 7s;
+        running: true;
+        triggered => { root.flip = !root.flip; }
+    }
+    Timer {
+        interval: 11s;
+        running: true;
+        triggered => { root.drift = !root.drift; }
+    }
+    Timer {
+        interval: 18s;
+        running: true;
+        triggered => { root.kb = !root.kb; }
+    }
+    Timer {
+        interval: 1.8s;
+        running: true;
+        triggered => { root.pulse = !root.pulse; }
+    }
+
+    // ---------- Fond ----------
+    Rectangle {
+        background: @linear-gradient(160deg, #06070c 0%, #0c1020 48%, #07080e 100%);
+    }
+    // aurore : trois nappes de couleur (celles de la jaquette) qui dérivent à des rythmes différents
+    Rectangle {
+        x: flip ? (-200px * Scale.k) : (-520px * Scale.k);
+        y: flip ? (-380px * Scale.k) : (-140px * Scale.k);
+        width: (1400px * Scale.k);
+        height: (1400px * Scale.k);
+        border-radius: (700px * Scale.k);
+        background: @radial-gradient(circle, accent.with-alpha(0.8) 0%, accent.with-alpha(0.3) 42%, transparent 70%);
+        animate x, y { duration: 7s; easing: ease-in-out; }
+    }
+    Rectangle {
+        x: root.width - (kb ? (640px * Scale.k) : (1060px * Scale.k));
+        y: root.height - (kb ? (560px * Scale.k) : (900px * Scale.k));
+        width: (1300px * Scale.k);
+        height: (1300px * Scale.k);
+        border-radius: (650px * Scale.k);
+        background: @radial-gradient(circle, accent2.with-alpha(0.75) 0%, accent2.with-alpha(0.28) 44%, transparent 70%);
+        animate x, y { duration: 18s; easing: ease-in-out; }
+    }
+    Rectangle {
+        x: root.width * (drift ? 0.15 : 0.5);
+        y: drift ? (-420px * Scale.k) : (-120px * Scale.k);
+        width: (1100px * Scale.k);
+        height: (1100px * Scale.k);
+        border-radius: (550px * Scale.k);
+        background: @radial-gradient(circle, accent3.with-alpha(0.7) 0%, accent3.with-alpha(0.25) 44%, transparent 70%);
+        animate x, y { duration: 11s; easing: ease-in-out; }
+    }
+    // la jaquette elle-même, minuscule puis agrandie (flou doux), qui respire lentement ; fondu à chaque changement
+    for g[i] in root.games: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        if i == root.sel && g.has-cover: Image {
+            property <float> t: 0;
+            init => { self.t = 1; }
+            animate t { duration: 700ms; easing: ease-out; }
+            source: g.bg;
+            image-fit: fill;
+            width: root.width * (root.kb ? 1.35 : 1.1);
+            height: root.height * (root.kb ? 1.35 : 1.1);
+            x: -(self.width - root.width) * (root.kb ? 0.8 : 0.2);
+            y: -(self.height - root.height) * (root.kb ? 0.3 : 0.7);
+            animate width, height, x, y { duration: 18s; easing: ease-in-out; }
+            opacity: t * 0.4;
+        }
+    }
+    // voile de lisibilité : sombre à gauche (texte) et en bas (carrousel)
+    Rectangle {
+        background: @linear-gradient(90deg, #05070ea8 0%, #05070e55 40%, #05070e10 100%);
+    }
+    Rectangle {
+        background: @linear-gradient(180deg, #00000040 0%, #00000000 35%, #00000066 100%);
+    }
+
+    // zone de déplacement (haut de la fenêtre), sous le contenu : les boutons restent cliquables
+    if root.windowed: TouchArea {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height * 0.16;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.move-window(); }
+        }
+    }
+
+    // Tout le contenu est dessiné sur une scène fixe 1920x1080. Le facteur d'échelle de la fenêtre est réglé
+    // côté Rust (fit_scale) pour qu'elle tienne dans la fenêtre : texte rasterisé à la bonne taille (net),
+    // contrairement à un transform-scale qui étire le rendu. Le fond remplit toute la fenêtre.
+    stage := Rectangle {
+        x: (root.width - (1920px * Scale.k)) / 2;
+        y: (root.height - (1080px * Scale.k)) / 2;
+        width: (1920px * Scale.k);
+        height: (1080px * Scale.k);
+
+        // ---------- Barre du haut ----------
+        Glass {
+            x: pad;
+            y: (40px * Scale.k);
+            height: (80px * Scale.k);
+            width: brand.preferred-width + (140px * Scale.k);
+            border-radius: (40px * Scale.k);
+            Image {
+                x: (22px * Scale.k);
+                y: (17px * Scale.k);
+                width: (46px * Scale.k);
+                height: (46px * Scale.k);
+                source: @image-url("logo.svg");
+            }
+            brand := Text {
+                x: (86px * Scale.k);
+                height: (80px * Scale.k);
+                text: "EMUNEST";
+                color: #f4f6fb;
+                font-size: (28px * Scale.k);
+                font-weight: 800;
+                letter-spacing: (4px * Scale.k);
+                vertical-alignment: center;
+            }
+        }
+        // boutons de fenêtre : en haut à droite, dans l'ordre Windows (réduire, agrandir, fermer)
+        Glass {
+            x: (1920px * Scale.k) - pad - self.width;
+            y: (40px * Scale.k);
+            width: (168px * Scale.k);
+            height: (80px * Scale.k);
+            border-radius: (40px * Scale.k);
+            Light { x: (30px * Scale.k); y: (27px * Scale.k); tint: #febc2e; glyph: "–"; clicked => { root.minimize(); } }
+            Light { x: (71px * Scale.k); y: (27px * Scale.k); tint: #28c840; glyph: "+"; clicked => { root.toggle-fullscreen(); } }
+            Light { x: (112px * Scale.k); y: (27px * Scale.k); tint: #ff5f57; glyph: "×"; clicked => { root.quit(); } }
+        }
+        // position dans la liste (ex. 5 / 36)
+        Glass {
+            x: (1920px * Scale.k) - pad - (168px * Scale.k) - (24px * Scale.k) - self.width;
+            y: (40px * Scale.k);
+            height: (80px * Scale.k);
+            width: st.preferred-width + (76px * Scale.k);
+            border-radius: (40px * Scale.k);
+            st := Text {
+                x: (38px * Scale.k);
+                height: (80px * Scale.k);
+                text: root.games.length > 0 ? "\{root.sel + 1} / \{root.games.length}" : "Aucun jeu";
+                color: #dfe4f1;
+                font-size: (28px * Scale.k);
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+
+        // ---------- Filtres : console, favoris, récents, recherche ----------
+        HorizontalLayout {
+            x: (1920px * Scale.k) - pad - (1500px * Scale.k);
+            y: (150px * Scale.k);
+            width: (1500px * Scale.k);
+            height: (56px * Scale.k);
+            spacing: (12px * Scale.k);
+            alignment: end;
+            if root.search != "" || root.searching: Rectangle {
+                width: st2.preferred-width + (48px * Scale.k);
+                height: (56px * Scale.k);
+                border-radius: (28px * Scale.k);
+                background: #00000066;
+                border-width: (2px * Scale.k);
+                border-color: accent;
+                st2 := Text {
+                    text: "Recherche : " + root.search + (root.searching ? "|" : "");
+                    color: #ffffff;
+                    font-size: (24px * Scale.k);
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+            for label[i] in root.filters: Rectangle {
+                width: ft.preferred-width + (44px * Scale.k);
+                height: (56px * Scale.k);
+                border-radius: (28px * Scale.k);
+                background: i == root.filter-index ? accent.with-alpha(0.85) : #ffffff1c;
+                border-width: (1px * Scale.k);
+                border-color: i == root.filter-index ? #ffffffaa : #ffffff30;
+                animate background { duration: 200ms; }
+                ft := Text {
+                    text: label;
+                    color: #ffffff;
+                    font-size: (24px * Scale.k);
+                    font-weight: i == root.filter-index ? 800 : 500;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                TouchArea { clicked => { root.key-action("#\{i}"); } }
+            }
+        }
+
+        // ---------- Héros : chaque changement de jeu rejoue une entrée en cascade ----------
+        for g[i] in root.games: Rectangle {
+            x: 0;
+            y: 0;
+            width: (1920px * Scale.k);
+            height: (360px * Scale.k);
+            if i == root.sel: Rectangle {
+                x: pad;
+                y: (150px * Scale.k);
+                width: (1920px * Scale.k) - 2 * pad;
+                height: (350px * Scale.k);
+
+                property <float> t1: 0;
+                property <float> t2: 0;
+                property <float> t3: 0;
+                property <float> t4: 0;
+                init => {
+                    self.t1 = 1;
+                    self.t2 = 1;
+                    self.t3 = 1;
+                    self.t4 = 1;
+                }
+                animate t1 { duration: 380ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
+                animate t2 { duration: 520ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
+                animate t3 { duration: 660ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
+                animate t4 { duration: 800ms; easing: cubic-bezier(0.34, 1.4, 0.64, 1); }
+
+                Glass {
+                    x: (-40px * Scale.k) * (1 - t1);
+                    opacity: t1;
+                    y: 0;
+                    height: (56px * Scale.k);
+                    width: chip.preferred-width + (84px * Scale.k);
+                    border-radius: (28px * Scale.k);
+                    Rectangle {
+                        x: (24px * Scale.k);
+                        y: (22px * Scale.k);
+                        width: (12px * Scale.k);
+                        height: (12px * Scale.k);
+                        border-radius: (6px * Scale.k);
+                        background: accent;
+                        drop-shadow-blur: (12px * Scale.k);
+                        drop-shadow-color: accent;
+                    }
+                    chip := Text {
+                        x: (50px * Scale.k);
+                        height: (56px * Scale.k);
+                        text: g.platform;
+                        color: #eef1f9;
+                        font-size: (24px * Scale.k);
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    x: (-70px * Scale.k) * (1 - t2);
+                    opacity: t2;
+                    y: (64px * Scale.k);
+                    width: parent.width;
+                    text: g.title;
+                    color: #ffffff;
+                    font-size: (78px * Scale.k);
+                    font-weight: 800;
+                    overflow: elide;
+                }
+                Text {
+                    x: (4px * Scale.k) - (50px * Scale.k) * (1 - t3);
+                    opacity: t3;
+                    y: (172px * Scale.k);
+                    text: "via " + g.emulator + "   ·   " + g.stats;
+                    color: #aab2c5;
+                    font-size: (30px * Scale.k);
+                }
+                Glass {
+                    x: 0;
+                    y: (258px * Scale.k) + (40px * Scale.k) * (1 - t4);
+                    opacity: t4;
+                    height: (88px * Scale.k);
+                    width: (300px * Scale.k);
+                    border-radius: (44px * Scale.k);
+                    background: @linear-gradient(180deg, accent.with-alpha(0.9) 0%, accent2.with-alpha(0.6) 100%);
+                    border-color: @linear-gradient(180deg, #ffffffaa 0%, #ffffff30 100%);
+                    drop-shadow-color: accent.with-alpha(0.5);
+                    drop-shadow-blur: (40px * Scale.k);
+                    Text {
+                        text: "▶   Jouer";
+                        color: #ffffff;
+                        font-size: (34px * Scale.k);
+                        font-weight: 800;
+                    }
+                    TouchArea { clicked => { root.launch(i); } }
+                }
+            }
+        }
+
+        if games.length == 0: Glass {
+            width: (760px * Scale.k);
+            height: (280px * Scale.k);
+            border-radius: (56px * Scale.k);
+            x: ((1920px * Scale.k) - self.width) / 2;
+            y: ((1080px * Scale.k) - self.height) / 2;
+            VerticalLayout {
+                alignment: center;
+                spacing: (16px * Scale.k);
+                Text { text: "Aucun jeu"; color: #ffffff; font-size: (52px * Scale.k); font-weight: 800; horizontal-alignment: center; }
+                Text { text: "Lance EmuNest avec un dossier de ROMs"; color: #aab2c5; font-size: (28px * Scale.k); horizontal-alignment: center; }
+            }
+        }
+
+        // ---------- Carrousel de jaquettes ----------
+        flick := Flickable {
+            x: 0;
+            y: (1080px * Scale.k) - (820px * Scale.k);
+            width: (1920px * Scale.k);
+            height: (820px * Scale.k);
+            interactive: false;
+            content-width: pad * 2 + games.length * (tw + gap) + (sw - tw) + (1920px * Scale.k) / 2;
+            content-height: self.height;
+            content-x: -max((0px * Scale.k), pad + sel * (tw + gap) + sw / 2 - (1920px * Scale.k) / 2);
+            animate content-x { duration: 420ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
+
+            for g[i] in root.games: tile := Rectangle {
+                property <bool> on: i == root.sel;
+                property <float> appear: 0;
+                property <float> sheen: on ? 1.0 : 0.0;
+                init => { self.appear = 1; }
+                animate appear { duration: 500ms + min(i, 14) * 40ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
+                animate sheen { duration: 900ms; easing: ease-out; }
+
+                // toutes les propriétés de géométrie partagent la même courbe : rien ne se chevauche
+                // la tuile épouse la forme de la jaquette (boîtier DVD, UMD, cartouche…) dans sa case
+                property <length> slot: on ? sw : tw;
+                property <length> h: min(on ? sh : (330px * Scale.k), slot / g.aspect);
+                // valeurs cibles (non animées) : x ne doit pas dépendre de la largeur en cours d'animation
+                property <length> w: h * g.aspect;
+                width: w;
+                height: h;
+                x: pad + i * (tw + gap) + (i > root.sel ? sw - tw : (0px * Scale.k)) + (slot - w) / 2;
+                y: (702px * Scale.k) - h + (60px * Scale.k) * (1 - appear);
+                opacity: appear;
+                animate x, y, width, height { duration: 420ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
+
+                // un clic sélectionne ; un second clic sur la jaquette sélectionnée lance le jeu
+                TouchArea {
+                    clicked => {
+                        if (on) { root.launch(i); } else { root.selected = i; }
+                    }
+                }
+                // lueur colorée (dégradé radial : aucun bord dur)
+                Rectangle {
+                    x: -parent.width * 0.55;
+                    y: -parent.height * 0.3;
+                    width: parent.width * 2.1;
+                    height: parent.height * 1.6;
+                    border-radius: self.height / 2;
+                    opacity: on ? 1.0 : 0.0;
+                    animate opacity { duration: 420ms; }
+                    background: @radial-gradient(circle, g.color.brighter(0.6).with-alpha(0.6) 0%, g.color.with-alpha(0.0) 48%);
+                }
+                // ombre douce sous la jaquette : pastilles arrondies empilées (pas de bord dur)
+                for k in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]: Rectangle {
+                    x: parent.width * 0.06 - k * (4px * Scale.k);
+                    y: parent.height - (4px * Scale.k) + k * (1.5px * Scale.k);
+                    width: parent.width * 0.88 + k * (8px * Scale.k);
+                    height: (8px * Scale.k) + k * (4px * Scale.k);
+                    border-radius: self.height / 2;
+                    background: #000000;
+                    opacity: on ? 0.05 : 0.04;
+                }
+
+                // flottement lent de la jaquette sélectionnée
+                floaty := Rectangle {
+                    y: on && root.pulse ? (-9px * Scale.k) : (0px * Scale.k);
+                    animate y { duration: 1.8s; easing: ease-in-out; }
+
+                    Cover {
+                        g: g;
+                        sheen: tile.sheen;
+                        border-radius: (30px * Scale.k);
+                    }
+                    Rectangle {
+                        border-radius: (30px * Scale.k);
+                        background: on ? #00000000 : #00000052;
+                        animate background { duration: 420ms; }
+                    }
+                    // liseré de verre
+                    Rectangle {
+                        border-radius: (30px * Scale.k);
+                        border-width: on ? (4px * Scale.k) : (1px * Scale.k);
+                        border-color: on ? @linear-gradient(180deg, #ffffffee 0%, #ffffff44 100%)
+                                         : @linear-gradient(180deg, #ffffff55 0%, #ffffff14 100%);
+                        animate border-width { duration: 300ms; }
+                    }
+                    if g.favorite: Path {
+                        x: parent.width - (58px * Scale.k);
+                        y: (14px * Scale.k);
+                        width: (40px * Scale.k);
+                        height: (40px * Scale.k);
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        commands: "M 12 1.5 L 15.2 8.4 L 22.6 9.2 L 17 14.2 L 18.7 21.6 L 12 17.8 L 5.3 21.6 L 7 14.2 L 1.4 9.2 L 8.8 8.4 Z";
+                        fill: #ffd166;
+                        stroke: #00000066;
+                        stroke-width: (1px * Scale.k);
+                    }
+                }
+            }
+        }
+
+        // ---------- Barre du bas : message passager, sinon aide des touches ----------
+        Glass {
+            width: hints.preferred-width + (96px * Scale.k);
+            height: (72px * Scale.k);
+            border-radius: (36px * Scale.k);
+            x: ((1920px * Scale.k) - self.width) / 2;
+            y: (984px * Scale.k);
+            opacity: root.toast == "" ? 1.0 : 0.0;
+            animate opacity { duration: 200ms; }
+            hints := HorizontalLayout {
+                padding-left: (48px * Scale.k);
+                padding-right: (48px * Scale.k);
+                padding-top: (10px * Scale.k);
+                spacing: (40px * Scale.k);
+                alignment: center;
+                if !root.pad-active: KeyHint { key: "← →"; label: "Naviguer"; }
+                if !root.pad-active: KeyHint { key: "Tab"; label: "Console"; }
+                if !root.pad-active: KeyHint { key: "Entrée"; label: "Jouer"; }
+                if !root.pad-active: KeyHint { key: "O"; label: "Options"; }
+                if !root.pad-active: KeyHint { key: "Échap"; label: "Quitter"; }
+                if root.pad-active: PadHint { role: "dpad"; kind: root.pad-kind; label: "Naviguer"; }
+                if root.pad-active: PadHint { role: "shoulders"; kind: root.pad-kind; label: "Console"; }
+                if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: "Jouer"; }
+                if root.pad-active: PadHint { role: "options"; kind: root.pad-kind; label: "Options"; }
+            }
+        }
+        if root.toast != "": Glass {
+            property <float> t: 0;
+            init => { self.t = 1; }
+            animate t { duration: 300ms; easing: ease-out; }
+            width: min((1920px * Scale.k) - 2 * pad, tt.preferred-width + (96px * Scale.k));
+            height: (72px * Scale.k);
+            border-radius: (36px * Scale.k);
+            x: ((1920px * Scale.k) - self.width) / 2;
+            y: (984px * Scale.k) + (16px * Scale.k) * (1 - self.t);
+            opacity: self.t;
+            tt := Text {
+                x: (48px * Scale.k);
+                width: parent.width - (96px * Scale.k);
+                height: (72px * Scale.k);
+                text: root.toast;
+                color: #f4f6fb;
+                font-size: (26px * Scale.k);
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        // ---------- Fenêtre modale ----------
+        if root.dialog-mode != 0: Rectangle {
+            x: 0;
+            y: 0;
+            width: (1920px * Scale.k);
+            height: (1080px * Scale.k);
+            background: #05070ed0;
+            TouchArea { }
+            Glass {
+                width: (1120px * Scale.k);
+                height: root.dialog-mode == 4 ? (190px * Scale.k) + root.menu-items.length * (72px * Scale.k) : (440px * Scale.k);
+                border-radius: (60px * Scale.k);
+                x: ((1920px * Scale.k) - self.width) / 2;
+                y: ((1080px * Scale.k) - self.height) / 2;
+                Text {
+                    x: (72px * Scale.k);
+                    y: (56px * Scale.k);
+                    width: parent.width - (144px * Scale.k);
+                    text: root.dialog-title;
+                    color: #ffffff;
+                    font-size: (46px * Scale.k);
+                    font-weight: 800;
+                    overflow: elide;
+                }
+                Text {
+                    x: (72px * Scale.k);
+                    y: (140px * Scale.k);
+                    width: parent.width - (144px * Scale.k);
+                    height: (170px * Scale.k);
+                    text: root.dialog-text;
+                    wrap: word-wrap;
+                    color: #c3c9d8;
+                    font-size: (28px * Scale.k);
+                }
+                if root.dialog-mode == 1 || root.dialog-mode == 3: HorizontalLayout {
+                    x: (72px * Scale.k);
+                    y: (324px * Scale.k);
+                    width: parent.width - (144px * Scale.k);
+                    height: (56px * Scale.k);
+                    spacing: (56px * Scale.k);
+                    alignment: start;
+                    if !root.pad-active: KeyHint { key: "Entrée"; label: root.dialog-mode == 3 ? "Vérifier" : "Installer"; }
+                    if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: root.dialog-mode == 3 ? "Vérifier" : "Installer"; }
+                    if root.dialog-mode == 3 && !root.pad-active: KeyHint { key: "O"; label: "Ouvrir le dossier"; }
+                    if root.dialog-mode == 3 && root.pad-active: PadHint { role: "extra"; kind: root.pad-kind; label: "Ouvrir le dossier"; }
+                    if !root.pad-active: KeyHint { key: "Échap"; label: "Annuler"; }
+                    if root.pad-active: PadHint { role: "back"; kind: root.pad-kind; label: "Annuler"; }
+                }
+                if root.dialog-mode == 4: Rectangle {
+                    x: (52px * Scale.k);
+                    y: (140px * Scale.k);
+                    width: parent.width - (104px * Scale.k);
+                    height: root.menu-items.length * (72px * Scale.k);
+                    for item[i] in root.menu-items: Rectangle {
+                        y: i * (72px * Scale.k);
+                        height: (64px * Scale.k);
+                        border-radius: (22px * Scale.k);
+                        background: i == root.menu-index ? accent.with-alpha(0.6) : #ffffff12;
+                        border-width: i == root.menu-index ? (2px * Scale.k) : (0px * Scale.k);
+                        border-color: #ffffffaa;
+                        Text {
+                            x: (28px * Scale.k);
+                            text: item;
+                            color: #ffffff;
+                            font-size: (30px * Scale.k);
+                            font-weight: i == root.menu-index ? 800 : 500;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.menu-activate(i); } }
+                    }
+                }
+                if root.dialog-mode == 2: Rectangle {
+                    x: (72px * Scale.k);
+                    y: (336px * Scale.k);
+                    width: parent.width - (144px * Scale.k);
+                    height: (24px * Scale.k);
+                    border-radius: (12px * Scale.k);
+                    background: #ffffff26;
+                    Rectangle {
+                        x: 0;
+                        width: max((24px * Scale.k), parent.width * root.progress);
+                        height: parent.height;
+                        border-radius: (12px * Scale.k);
+                        background: @linear-gradient(90deg, accent, accent2);
+                        animate width { duration: 150ms; easing: ease-out; }
+                    }
+                }
+            }
+        }
+    }
+
+
+    // poignées de redimensionnement sur les bords et coins (mode fenêtre)
+    if root.windowed: Rectangle {
+        Grip { x: 12px; y: 0; width: parent.width - 24px; height: 7px; mouse-cursor: ns-resize; code: 12; grab(c) => { root.resize-edge(c); } }
+        Grip { x: 12px; y: parent.height - 7px; width: parent.width - 24px; height: 7px; mouse-cursor: ns-resize; code: 15; grab(c) => { root.resize-edge(c); } }
+        Grip { x: 0; y: 12px; width: 7px; height: parent.height - 24px; mouse-cursor: ew-resize; code: 10; grab(c) => { root.resize-edge(c); } }
+        Grip { x: parent.width - 7px; y: 12px; width: 7px; height: parent.height - 24px; mouse-cursor: ew-resize; code: 11; grab(c) => { root.resize-edge(c); } }
+        Grip { x: 0; y: 0; width: 12px; height: 12px; mouse-cursor: nwse-resize; code: 13; grab(c) => { root.resize-edge(c); } }
+        Grip { x: parent.width - 12px; y: 0; width: 12px; height: 12px; mouse-cursor: nesw-resize; code: 14; grab(c) => { root.resize-edge(c); } }
+        Grip { x: 0; y: parent.height - 12px; width: 12px; height: 12px; mouse-cursor: nesw-resize; code: 16; grab(c) => { root.resize-edge(c); } }
+        Grip { x: parent.width - 12px; y: parent.height - 12px; width: 12px; height: 12px; mouse-cursor: nwse-resize; code: 17; grab(c) => { root.resize-edge(c); } }
+    }
+
+    fs := FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (root.dialog-mode != 0) {
+                if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Return) { root.dialog-accept(); }
+                else if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Escape) { root.dialog-cancel(); }
+                else if (root.dialog-mode == 3 && (e.text == "o" || e.text == "O")) { root.dialog-extra(); }
+                else if (root.dialog-mode == 4) {
+                    if (e.text == Key.UpArrow) { root.menu-index = max(root.menu-index - 1, 0); }
+                    else if (e.text == Key.DownArrow) { root.menu-index = min(root.menu-index + 1, root.menu-items.length - 1); }
+                    else if (e.text == Key.Return) { root.menu-activate(root.menu-index); }
+                    else if (e.text == Key.Escape) { root.dialog-cancel(); }
+                }
+                return accept;
+            }
+            if (root.key-action(e.text)) { return accept; }
+            if (e.text == Key.Escape) { root.quit(); return accept; }
+            if (games.length == 0) { return reject; }
+            if (e.text == Key.RightArrow || e.text == Key.DownArrow) { selected = min(sel + 1, games.length - 1); }
+            else if (e.text == Key.LeftArrow || e.text == Key.UpArrow) { selected = max(sel - 1, 0); }
+            else if (e.text == Key.PageDown) { selected = min(sel + 5, games.length - 1); }
+            else if (e.text == Key.PageUp) { selected = max(sel - 5, 0); }
+            else if (e.text == Key.Home) { selected = 0; }
+            else if (e.text == Key.End) { selected = games.length - 1; }
+            else if (e.text == Key.Return) { root.launch(sel); }
+            else { return reject; }
+            accept
+        }
+    }
+}

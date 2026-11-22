@@ -1,0 +1,6 @@
+name = "Dolphin"
+platforms = ["gc", "wii"]
+extensions = ["iso", "rvz", "gcm", "wbfs"]
+source = { type = "page", url = "https://dolphin-emu.org/download/", ends_with = "-x64.7z" }
+executable = "Dolphin.exe"
+launch_args = ["-b", "-e", "{rom}"]

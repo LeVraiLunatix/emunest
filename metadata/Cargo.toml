@@ -1,0 +1,13 @@
+[package]
+name = "emunest-metadata"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.104"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+reqwest = { version = "0.13.5", features = ["blocking"] }
+serde_json = "1.0.154"
+tracing = "0.1.44"
+emunest-core = { path = "../core" }
+emunest-emulators = { path = "../emulators" }

@@ -1,0 +1,28 @@
+name: Release
+# Publie un zip portable de l'exécutable à chaque étiquette vX.Y.Z
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p emunest
+      - name: Archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/emunest.exe dist/
+          Copy-Item README.md dist/
+          Compress-Archive -Path dist/* -DestinationPath "EmuNest-${{ github.ref_name }}-windows-x64.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: EmuNest-*.zip
+          generate_release_notes: true

@@ -1,0 +1,6 @@
+name = "RPCS3"
+platforms = ["ps3"]
+extensions = ["iso", "pkg"]
+source = { type = "github", repo = "RPCS3/rpcs3-binaries-win" }
+executable = "rpcs3.exe"
+launch_args = ["--no-gui", "{rom}"]

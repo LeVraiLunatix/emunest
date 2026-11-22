@@ -1,0 +1,15 @@
+name = "DuckStation"
+platforms = ["psx"]
+extensions = ["cue", "chd", "pbp", "ecm"]
+source = { type = "github", repo = "stenzek/duckstation" }
+executable = "duckstation-qt-x64-ReleaseLTCG.exe"
+launch_args = ["-batch", "-fullscreen", "--", "{rom}"]
+portable = true
+
+[[requires]]
+label = "BIOS PlayStation"
+dir = "bios"
+alt_dirs = ['%USERPROFILE%\Documents\DuckStation\bios']
+extensions = ["bin"]
+min_kb = 500
+hint = "Fichier .bin dumpé depuis ta propre PlayStation (ex. scph5501.bin)."

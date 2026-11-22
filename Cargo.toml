@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["core", "emulators", "ui", "app", "metadata"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Dev rapide : dépendances (Slint, image…) optimisées même en debug, sinon l'UI saccade.
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3

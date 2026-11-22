@@ -1,0 +1,6 @@
+name = "melonDS"
+platforms = ["nds"]
+extensions = ["nds", "dsi"]
+source = { type = "github", repo = "melonDS-emu/melonDS" }
+executable = "melonDS.exe"
+launch_args = ["-f", "{rom}"]

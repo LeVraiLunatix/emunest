@@ -1,0 +1,15 @@
+name = "PCSX2"
+platforms = ["ps2"]
+extensions = ["iso", "chd", "cso", "bin"]
+source = { type = "github", repo = "PCSX2/pcsx2" }
+executable = "pcsx2-qt.exe"
+launch_args = ["-batch", "-fullscreen", "--", "{rom}"]
+portable = true
+
+[[requires]]
+label = "BIOS PlayStation 2"
+dir = "bios"
+alt_dirs = ['%USERPROFILE%\Documents\PCSX2\bios']
+extensions = ["bin"]
+min_kb = 3000
+hint = "Fichier .bin dumpé depuis ta propre PS2 (ex. SCPH-70004.bin)."

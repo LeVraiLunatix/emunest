@@ -1,0 +1,6 @@
+name = "Ryujinx"
+platforms = ["switch"]
+extensions = ["nsp", "xci"]
+source = { type = "manual" }
+executable = "Ryujinx.exe"
+launch_args = ["-f", "{rom}"]

@@ -1,0 +1,19 @@
+[package]
+name = "emunest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.104"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+emunest-core = { path = "../core" }
+emunest-metadata = { path = "../metadata" }
+emunest-emulators = { path = "../emulators" }
+emunest-ui = { path = "../ui" }
+gilrs = "0.11.2"
+notify = "9.0.0"
+rfd = "0.18.0"
+
+[build-dependencies]
+winresource = "0.1.34"

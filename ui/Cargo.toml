@@ -1,0 +1,15 @@
+[package]
+name = "emunest-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+slint = { version = "1.19.0", features = ["raw-window-handle-06"] }
+emunest-core = { path = "../core" }
+emunest-metadata = { path = "../metadata" }
+emunest-emulators = { path = "../emulators" }
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation"] }
+
+[build-dependencies]
+slint-build = "1.19.0"
