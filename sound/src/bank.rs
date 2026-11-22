@@ -16,6 +16,13 @@ pub struct Sample {
     pub confidence: f32,
 }
 
+/// Comme `load`, avec la hauteur cherchée entre 25 et 150 Hz (basses, 808).
+pub fn load_bass(path: &Path) -> Result<Sample> {
+    let mut s = load(path)?;
+    (s.base_freq, s.confidence) = detect_pitch_in(&s.data, 25.0, 150.0);
+    Ok(s)
+}
+
 /// Décode un fichier audio (wav, ogg, flac, mp3), le passe en mono 44,1 kHz, retire le silence du début
 /// et normalise le pic à 1. Limité à 4 s : on n'a besoin que de l'attaque et de la première résonance.
 pub fn load(path: &Path) -> Result<Sample> {
@@ -56,10 +63,15 @@ pub fn load(path: &Path) -> Result<Sample> {
 
 /// Hauteur par autocorrélation normalisée, sur une fenêtre juste après l'attaque.
 pub fn detect_pitch(data: &[f32]) -> (f32, f32) {
+    detect_pitch_in(data, 70.0, 2000.0)
+}
+
+/// Pareil, dans la plage `fmin..fmax` Hz (les 808 descendent sous 70 Hz).
+pub fn detect_pitch_in(data: &[f32], fmin: f32, fmax: f32) -> (f32, f32) {
     let sr = SR as f32;
-    let (lo, hi) = ((sr / 2000.0) as usize, (sr / 70.0) as usize);
-    let win = 4096usize;
-    let from = (0.04 * sr) as usize;
+    let (lo, hi) = ((sr / fmax) as usize, (sr / fmin) as usize);
+    let win = 8192usize;
+    let from = (0.08 * sr) as usize;
     if data.len() < from + win + hi + 2 {
         return (440.0, 0.0);
     }

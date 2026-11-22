@@ -191,16 +191,19 @@ pub struct Bank {
     pub chime: Option<bank::Sample>,
     /// nappe (pad.*) pour l'intro et le lancement
     pub pad: Option<bank::Sample>,
+    /// basse profonde (`bass.*`, un 808 par exemple) pour l'intro
+    pub bass: Option<bank::Sample>,
 }
 
 /// Charge `bell.*` et `chime.*` (wav, ogg, flac, mp3) du dossier ; un fichier illisible est simplement ignoré.
 pub fn load_bank(dir: &std::path::Path) -> Bank {
-    let find = |stem: &str| -> Option<bank::Sample> {
+    let find_with = |stem: &str, load: fn(&std::path::Path) -> anyhow::Result<bank::Sample>| -> Option<bank::Sample> {
         std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
             p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(stem))
-        }).and_then(|p| bank::load(&p).map_err(|e| tracing::warn!("échantillon ignoré : {e:#}")).ok())
+        }).and_then(|p| load(&p).map_err(|e| tracing::warn!("échantillon ignoré : {e:#}")).ok())
     };
-    Bank { bell: find("bell"), chime: find("chime"), pad: find("pad") }
+    let find = |stem: &str| find_with(stem, bank::load);
+    Bank { bell: find("bell"), chime: find("chime"), pad: find("pad"), bass: find_with("bass", bank::load_bass) }
 }
 
 /// Une note : l'échantillon de l'utilisateur à la bonne hauteur s'il y en a un, sinon la synthèse.
@@ -339,7 +342,7 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
             reverb(
                 mix(vec![
                     (0, swish(1.6, true, 0.45)),
-                    (0, pad(65.41, 4.2, 1.3, 1.4, 0.9)),
+                    (0, match &bank.bass { Some(b) => b.note(65.41, 4.2, 0.02, 1.6, 1.0), None => pad(65.41, 4.2, 1.3, 1.4, 0.9) }),
                     (0, pad(130.81, 4.2, 1.2, 1.5, 0.7)),
                     (150, pad(196.0, 4.0, 1.2, 1.4, 0.5)),
                     (300, pad(293.66, 3.8, 1.1, 1.3, 0.38)),
