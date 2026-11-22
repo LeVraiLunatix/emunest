@@ -189,6 +189,8 @@ fn pad(freq: f32, secs: f32, attack: f32, release: f32, amp: f32) -> Vec<f32> {
 pub struct Bank {
     pub bell: Option<bank::Sample>,
     pub chime: Option<bank::Sample>,
+    /// nappe (pad.*) pour l'intro et le lancement
+    pub pad: Option<bank::Sample>,
 }
 
 /// Charge `bell.*` et `chime.*` (wav, ogg, flac, mp3) du dossier ; un fichier illisible est simplement ignoré.
@@ -198,7 +200,7 @@ pub fn load_bank(dir: &std::path::Path) -> Bank {
             p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(stem))
         }).and_then(|p| bank::load(&p).map_err(|e| tracing::warn!("échantillon ignoré : {e:#}")).ok())
     };
-    Bank { bell: find("bell"), chime: find("chime") }
+    Bank { bell: find("bell"), chime: find("chime"), pad: find("pad") }
 }
 
 /// Une note : l'échantillon de l'utilisateur à la bonne hauteur s'il y en a un, sinon la synthèse.
@@ -223,6 +225,12 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
     let tone = |freq: f32, secs: f32, attack: f32, decay: f32, partials: &[(f32, f32)], glide: f32, amp: f32| {
         voice(bank, freq, secs, attack, decay, partials, glide, amp)
     };
+    // nappes : l'échantillon réel s'il existe ; le souffle bruité (le plus « synthé ») est presque coupé dans ce cas
+    let pad = |freq: f32, secs: f32, attack: f32, release: f32, amp: f32| match &bank.pad {
+        Some(p) => p.note(freq, secs, attack, release * 2.0, amp * 0.8),
+        None => pad(freq, secs, attack, release, amp),
+    };
+    let swish = |secs: f32, rising: bool, amp: f32| swish(secs, rising, if bank.bell.is_some() { amp * 0.15 } else { amp });
     match sound {
         // déplacement : une goutte douce, à peine perceptible
         Move => finish(tone(392.0, 0.16, 0.010, 0.050, ROUND, -0.06, 1.0), 0.17),
