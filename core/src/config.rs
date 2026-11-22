@@ -18,7 +18,7 @@ fn one_or_many<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<PathBuf>, D::Error
     })
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// dossiers de ROMs scannés (et surveillés)
     #[serde(default, deserialize_with = "one_or_many")]
@@ -31,8 +31,31 @@ pub struct Config {
     /// sauvegarde automatique des saves après chaque partie
     #[serde(default)]
     pub auto_backup: bool,
+    /// sons de l'interface
+    #[serde(default = "yes")]
+    pub sound: bool,
+    /// volume des sons (0.0 à 1.0)
+    #[serde(default = "default_volume")]
+    pub volume: f32,
+    /// installe tout seul les nouvelles versions d'EmuNest (jamais sur un exécutable compilé sur place)
+    #[serde(default = "yes")]
+    pub auto_update: bool,
     /// jeton GitHub (facultatif) pour chercher les mises à jour d'EmuNest dans un dépôt privé
     pub github_token: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn default_volume() -> f32 {
+    0.6
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { roms: vec![], emulators: BTreeMap::new(), backup_dir: None, auto_backup: false, sound: true, volume: 0.6, auto_update: true, github_token: None }
+    }
 }
 
 pub fn load(data: &Path) -> Config {
@@ -69,6 +92,7 @@ mod tests {
         assert_eq!(one.emulators["PCSX2"], PathBuf::from("D:\\p.exe"));
         let many: Config = toml::from_str("roms = ['A:\\x', 'B:\\y']").unwrap();
         assert_eq!(many.roms.len(), 2);
+        assert!(many.sound && many.volume > 0.0, "sons activés par défaut");
         let again: Config = toml::from_str(&toml::to_string_pretty(&many).unwrap()).unwrap();
         assert_eq!(again.roms, many.roms);
     }

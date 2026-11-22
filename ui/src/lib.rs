@@ -1,6 +1,7 @@
 //! Interface Slint : fenêtre principale + glue vers les modèles du core.
 use emunest_core::Game;
 use emunest_emulators::platform_name;
+use emunest_sound::{play as sfx, Sound};
 use slint::{Color, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -99,6 +100,7 @@ thread_local! {
 pub fn on_launch(win: &MainWindow, f: impl Fn(Game) + 'static) {
     win.on_launch(move |i| {
         if let Some(g) = VIEW.with_borrow(|v| v.visible.get(i as usize).cloned()) {
+            sfx(Sound::Launch);
             f(g);
         }
     });
@@ -308,6 +310,7 @@ fn prompt_edit(win: &MainWindow, edit: impl FnOnce(&mut String)) {
 
 /// Appuie sur la touche `i` du clavier à l'écran (manette ou clic).
 fn kb_press(win: &MainWindow, i: usize) {
+    sfx(if i == 43 { Sound::Select } else { Sound::Key });
     match i {
         i if i < KB_LETTERS => {
             let c = KB_ROWS.iter().flat_map(|r| r.chars()).nth(i).unwrap_or(' ');
@@ -342,10 +345,17 @@ fn kb_press(win: &MainWindow, i: usize) {
 /// `missing_file` = vrai pour l'écran « fichier manquant » (Vérifier / Ouvrir le dossier / Annuler),
 /// faux pour la proposition d'installation (Installer / Annuler).
 pub fn ask(win: &MainWindow, title: &str, text: &str, missing_file: bool, tx: Sender<Answer>) {
+    win.set_dialog_accept_label("Installer".into());
     ANSWER.with_borrow_mut(|a| *a = Some(tx));
     win.set_dialog_title(title.into());
     win.set_dialog_text(text.into());
     win.set_dialog_mode(if missing_file { 3 } else { 1 });
+}
+
+/// Demande confirmation avec un libellé de bouton au choix (ex. « Restaurer »). Thread UI.
+pub fn confirm(win: &MainWindow, title: &str, text: &str, accept_label: &str, tx: Sender<Answer>) {
+    ask(win, title, text, false, tx);
+    win.set_dialog_accept_label(accept_label.into());
 }
 
 /// Affiche une barre de progression (`fraction` entre 0 et 1). Thread UI.
@@ -367,6 +377,8 @@ pub fn quit() {
 
 /// Message passager en bas de l'écran (6 s).
 pub fn toast(win: &MainWindow, msg: &str) {
+    let failed = ["impossible", "introuvable", "erreur", "échec", "n'existe plus"].iter().any(|w| msg.to_lowercase().contains(w));
+    sfx(if failed { Sound::Error } else { Sound::Toast });
     win.set_toast(msg.into());
     let weak = win.as_weak();
     TOAST.with(|t| {
@@ -549,6 +561,7 @@ fn select_filter(win: &MainWindow, index: usize) {
 }
 
 fn step_filter(win: &MainWindow, d: i32) {
+    sfx(Sound::Filter);
     let (n, cur) = VIEW.with_borrow(|v| {
         let f = filters_of(&v.all, &v.collections);
         (f.len() as i32, f.iter().position(|x| *x == v.filter).unwrap_or(0) as i32)
@@ -559,6 +572,7 @@ fn step_filter(win: &MainWindow, d: i32) {
 fn toggle_favorite(win: &MainWindow) {
     let cb = VIEW.with_borrow(|v| v.on_favorite.clone());
     if let (Some(cb), Some(g)) = (cb, current_game(win)) {
+        sfx(if g.favorite { Sound::Close } else { Sound::Favorite });
         cb(g);
     }
 }
@@ -607,6 +621,7 @@ fn gallery_show(win: &MainWindow) {
 }
 
 fn gallery_step(win: &MainWindow, d: i32) {
+    sfx(Sound::Move);
     VIEW.with_borrow_mut(|v| {
         let n = v.gallery.len() as i32;
         if n > 0 {
@@ -825,6 +840,7 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
     win.on_key_action(move |text| weak.upgrade().is_some_and(|w| key_action(&w, text.as_str())));
     let weak = win.as_weak();
     win.on_menu_activate(move |i| {
+        sfx(Sound::Select);
         let Some(w) = weak.upgrade() else { return };
         w.set_dialog_mode(0);
         let action = VIEW.with_borrow(|v| v.menu.get(i as usize).copied());
@@ -843,6 +859,7 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
     });
     let weak = win.as_weak();
     win.on_dialog_accept(move || {
+        sfx(Sound::Select);
         if let Some(w) = weak.upgrade() {
             match w.get_dialog_mode() {
                 5 => {
@@ -871,6 +888,7 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
     });
     let weak = win.as_weak();
     win.on_dialog_cancel(move || {
+        sfx(Sound::Back);
         if let Some(w) = weak.upgrade() {
             w.set_dialog_mode(0);
         }
@@ -900,6 +918,15 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
             kb_show(&w);
             kb_press(&w, i as usize);
         }
+    });
+    win.on_sfx(|name| {
+        sfx(match name.as_str() {
+            "move" => Sound::Move,
+            "key" => Sound::Key,
+            "open" => Sound::Open,
+            "close" => Sound::Close,
+            _ => return,
+        })
     });
     win.on_quit(|| {
         let _ = slint::quit_event_loop();

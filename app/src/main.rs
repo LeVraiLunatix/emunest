@@ -242,11 +242,19 @@ enum Sub {
     InstallEmulator(String),
     OpenData,
     OpenConfig,
+    BackupMenu,
+    SoundMenu,
+    UpdateMenu,
     CheckUpdate,
+    ToggleAutoUpdate,
     BackupNow,
     ToggleAutoBackup,
+    ToggleSound,
+    CycleVolume,
     SetBackupDir,
     OpenBackupDir,
+    RestoreList,
+    RestoreBackup(PathBuf),
 }
 
 static SUB: Mutex<Vec<Sub>> = Mutex::new(Vec::new());
@@ -318,13 +326,50 @@ fn show_settings(data: &Path, ui: &Ui) {
         vec![
             (Sub::RomFolders, format!("Dossiers de ROMs ({})…", cfg.roms.len())),
             (Sub::Emulators, "Émulateurs…".into()),
-            (Sub::BackupNow, "Sauvegarder les sauvegardes de jeu maintenant".into()),
-            (Sub::ToggleAutoBackup, format!("Sauvegarde automatique après chaque partie : {}", if cfg.auto_backup { "oui" } else { "non" })),
-            (Sub::SetBackupDir, format!("Dossier des sauvegardes : {}…", cfg.backup_dir(data).display())),
-            (Sub::OpenBackupDir, "Ouvrir le dossier des sauvegardes".into()),
-            (Sub::CheckUpdate, format!("Rechercher une mise à jour d'EmuNest (v{VERSION})")),
+            (Sub::BackupMenu, "Sauvegardes de jeu…".into()),
+            (Sub::SoundMenu, format!("Sons : {}…", if cfg.sound { "oui" } else { "non" })),
+            (Sub::UpdateMenu, format!("Mises à jour d'EmuNest (v{VERSION})…")),
             (Sub::OpenData, "Ouvrir le dossier de données".into()),
             (Sub::OpenConfig, "Ouvrir config.toml".into()),
+        ],
+    );
+}
+
+fn show_backup_menu(data: &Path, ui: &Ui) {
+    let cfg = config::load(data);
+    show_sub(
+        ui,
+        "Sauvegardes de jeu".into(),
+        vec![
+            (Sub::BackupNow, "Sauvegarder maintenant".into()),
+            (Sub::RestoreList, "Restaurer une sauvegarde…".into()),
+            (Sub::ToggleAutoBackup, format!("Sauvegarde automatique après chaque partie : {}", if cfg.auto_backup { "oui" } else { "non" })),
+            (Sub::SetBackupDir, format!("Dossier : {}…", cfg.backup_dir(data).display())),
+            (Sub::OpenBackupDir, "Ouvrir le dossier des sauvegardes".into()),
+        ],
+    );
+}
+
+fn show_sound_menu(data: &Path, ui: &Ui) {
+    let cfg = config::load(data);
+    show_sub(
+        ui,
+        "Sons de l'interface".into(),
+        vec![
+            (Sub::ToggleSound, format!("Sons : {}", if cfg.sound { "oui" } else { "non" })),
+            (Sub::CycleVolume, format!("Volume : {} %", (cfg.volume * 100.0).round() as u32)),
+        ],
+    );
+}
+
+fn show_update_menu(data: &Path, ui: &Ui) {
+    let cfg = config::load(data);
+    show_sub(
+        ui,
+        format!("Mises à jour · EmuNest v{VERSION}"),
+        vec![
+            (Sub::CheckUpdate, "Rechercher une mise à jour maintenant".into()),
+            (Sub::ToggleAutoUpdate, format!("Installer automatiquement les nouvelles versions : {}", if cfg.auto_update { "oui" } else { "non" })),
         ],
     );
 }
@@ -372,7 +417,7 @@ fn update_emulator(data: &Path, ui: &Ui, profile: &Profile) {
 
 /// Cherche une nouvelle version d'EmuNest ; `manual` = demandé par l'utilisateur (sinon silencieux sauf nouveauté).
 fn check_update(data: &Path, ui: &Ui, manual: bool) {
-    let token = config::load(data).github_token;
+    let token = config::load(data).github_token.or_else(emunest_core::update::gh_token);
     let release = match emunest_core::update::check(VERSION, token.as_deref()) {
         Ok(Some(r)) => r,
         Ok(None) => {
@@ -412,6 +457,30 @@ fn check_update(data: &Path, ui: &Ui, manual: bool) {
         }
         Err(e) => {
             let _ = ui.upgrade_in_event_loop(|w| emunest_ui::close_dialog(&w));
+            toast(ui, format!("Mise à jour impossible : {e:#}"));
+        }
+    }
+}
+
+/// Mise à jour automatique au démarrage : télécharge et installe la nouvelle version sans rien demander ;
+/// elle sert au prochain lancement. Jamais sur un exécutable compilé sur place.
+fn auto_update(data: &Path, ui: &Ui) {
+    let cfg = config::load(data);
+    let Ok(exe) = std::env::current_exe() else { return };
+    if !cfg.auto_update || emunest_core::update::is_dev_build(&exe) {
+        return;
+    }
+    let token = cfg.github_token.or_else(emunest_core::update::gh_token);
+    let release = match emunest_core::update::check(VERSION, token.as_deref()) {
+        Ok(Some(r)) => r,
+        Ok(None) => return,
+        Err(e) => return tracing::info!("mise à jour automatique : {e:#}"),
+    };
+    toast(ui, format!("Mise à jour d'EmuNest vers v{} en cours…", release.version));
+    match emunest_core::update::apply(&release, token.as_deref(), &mut |_| {}) {
+        Ok(_) => toast(ui, format!("EmuNest v{} est installé : relance-le pour en profiter", release.version)),
+        Err(e) => {
+            tracing::warn!("mise à jour automatique : {e:#}");
             toast(ui, format!("Mise à jour impossible : {e:#}"));
         }
     }
@@ -551,7 +620,73 @@ fn handle_sub(data: &Path, ui: &Ui, sub: Sub, game: Option<Game>, cli: &Option<P
                 update_emulator(data, ui, &p);
             }
         }
+        Sub::BackupMenu => show_backup_menu(data, ui),
+        Sub::SoundMenu => show_sound_menu(data, ui),
+        Sub::UpdateMenu => show_update_menu(data, ui),
         Sub::CheckUpdate => check_update(data, ui, true),
+        Sub::ToggleAutoUpdate => {
+            let mut cfg = config::load(data);
+            cfg.auto_update = !cfg.auto_update;
+            log_err(config::save(data, &cfg));
+            toast(ui, if cfg.auto_update { "Mises à jour automatiques activées" } else { "Mises à jour automatiques désactivées" });
+        }
+        Sub::RestoreList => {
+            let dest = config::load(data).backup_dir(data);
+            let list = emunest_core::backup::list_backups(&dest);
+            if list.is_empty() {
+                return toast(ui, format!("Aucune sauvegarde dans {}", dest.display()));
+            }
+            let entries = list
+                .into_iter()
+                .take(30)
+                .map(|b| {
+                    let label = format!("{} — {} ({} Mo)", b.emulator, emunest_core::backup::stamp_label(&b.stamp), (b.size / 1_048_576).max(1));
+                    (Sub::RestoreBackup(b.path), label)
+                })
+                .collect();
+            show_sub(ui, "Restaurer une sauvegarde".into(), entries);
+        }
+        Sub::RestoreBackup(path) => {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let Some(emulator) = emunest_core::backup::list_backups(path.parent().unwrap_or(Path::new("."))).into_iter().find(|b| b.path == path).map(|b| b.emulator) else {
+                return toast(ui, "Sauvegarde introuvable");
+            };
+            let Some(profile) = profile_of(&emulator) else { return toast(ui, format!("Émulateur « {emulator} » inconnu")) };
+            let Some(exe) = launch::find_executable(data, &profile) else {
+                return toast(ui, format!("{} n'est pas installé : impossible de restaurer", profile.name));
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            let title = format!("Restaurer les sauvegardes de {} ?", profile.name);
+            let text = format!("{name}\nFerme l'émulateur d'abord. Les sauvegardes actuelles sont mises de côté avant d'être remplacées.");
+            let _ = ui.upgrade_in_event_loop(move |w| emunest_ui::confirm(&w, &title, &text, "Restaurer", tx));
+            if rx.recv() != Ok(Answer::Yes) {
+                return;
+            }
+            let safety = config::load(data).backup_dir(data);
+            match emunest_core::backup::restore(&path, &exe, &profile, &safety) {
+                Ok(n) => toast(ui, format!("{n} fichier(s) restauré(s) pour {}", profile.name)),
+                Err(e) => toast(ui, format!("Restauration impossible : {e:#}")),
+            }
+        }
+        Sub::ToggleSound => {
+            let mut cfg = config::load(data);
+            cfg.sound = !cfg.sound;
+            log_err(config::save(data, &cfg));
+            emunest_sound::set_enabled(cfg.sound);
+            emunest_sound::play(emunest_sound::Sound::Select);
+            toast(ui, if cfg.sound { "Sons activés" } else { "Sons coupés" });
+        }
+        Sub::CycleVolume => {
+            // 20 → 40 → 60 → 80 → 100 → 20 %
+            let mut cfg = config::load(data);
+            let cur = (cfg.volume * 100.0).round() as u32;
+            let pct = [20u32, 40, 60, 80, 100].into_iter().find(|&l| l > cur).unwrap_or(20);
+            cfg.volume = pct as f32 / 100.0;
+            log_err(config::save(data, &cfg));
+            emunest_sound::set_volume(cfg.volume);
+            emunest_sound::play(emunest_sound::Sound::Select);
+            toast(ui, format!("Volume des sons : {pct} %"));
+        }
         Sub::BackupNow => {
             toast(ui, "Sauvegarde des saves en cours…");
             let dest = config::load(data).backup_dir(data);
@@ -686,6 +821,12 @@ fn main() -> Result<()> {
     }
 
     let data = data_dir();
+    {
+        let cfg = config::load(&data);
+        if emunest_sound::init(cfg.sound, cfg.volume) {
+            emunest_sound::play(emunest_sound::Sound::Start);
+        }
+    }
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::fs::remove_file(exe.with_extension("old")); // reste d'une mise à jour précédente
     }
@@ -745,7 +886,7 @@ fn main() -> Result<()> {
     // Tout le travail lent (scan, réseau) hors du thread UI : la fenêtre s'affiche tout de suite.
     std::thread::spawn(move || {
         reload(&data, &weak);
-        check_update(&data, &weak, false); // la bibliothèque déjà connue s'affiche sans attendre le scan
+        auto_update(&data, &weak); // la bibliothèque déjà connue s'affiche sans attendre le scan
         let dirs = rom_dirs(&data, &roms);
         if dirs.is_empty() {
             if let Ok(games) = db(&data).and_then(|l| l.games()) {

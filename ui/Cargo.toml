@@ -10,6 +10,7 @@ emunest-metadata = { path = "../metadata" }
 emunest-emulators = { path = "../emulators" }
 raw-window-handle = "0.6"
 windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation"] }
+emunest-sound = { version = "0.1.0", path = "../sound" }
 
 [build-dependencies]
 slint-build = "1.19.0"

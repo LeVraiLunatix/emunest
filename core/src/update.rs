@@ -27,6 +27,21 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     matches!((parse(latest), parse(current)), (Some(l), Some(c)) if l > c)
 }
 
+/// Jeton de l'utilisateur déjà connecté à GitHub avec `gh` (jamais enregistré, lu à la demande) :
+/// permet de suivre les releases d'un dépôt privé sans rien configurer.
+pub fn gh_token() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("gh").args(["auth", "token"]).creation_flags(0x0800_0000).output().ok()?; // CREATE_NO_WINDOW
+    let token = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !token.is_empty()).then_some(token)
+}
+
+/// Vrai pour un exécutable compilé sur place (`…\target\release\…`) : on ne le remplace jamais automatiquement.
+pub fn is_dev_build(exe: &Path) -> bool {
+    let parts: Vec<_> = exe.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect();
+    parts.windows(2).any(|w| w[0] == "target" && (w[1] == "release" || w[1] == "debug"))
+}
+
 fn client(token: Option<&str>) -> Result<reqwest::blocking::Client> {
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(t) = token.filter(|t| !t.is_empty()) {
@@ -121,6 +136,13 @@ pub fn apply(release: &Release, token: Option<&str>, progress: &mut dyn FnMut(f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_builds_are_never_auto_updated() {
+        assert!(is_dev_build(Path::new(r"D:\Code\emulaunch\target\release\emunest.exe")));
+        assert!(is_dev_build(Path::new(r"D:\x\Target\Debug\emunest.exe")));
+        assert!(!is_dev_build(Path::new(r"C:\Users\a\AppData\Local\Programs\EmuNest\emunest.exe")));
+    }
 
     #[test]
     fn compares_versions() {

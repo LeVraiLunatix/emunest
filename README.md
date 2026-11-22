@@ -26,7 +26,9 @@ Launcher d'émulateurs en **Rust pur** (pas de webview), rapide et léger, avec 
 - **Saisie de texte à la manette** : un clavier à l'écran apparaît pour nommer une collection ou écrire une note
   (croix = bouger, A = taper, X = effacer, Y = espace, RB = Maj).
 - **Mode télé** : `emunest.exe --tv` (plein écran, sans boutons de fenêtre, tout à la manette).
-- **Mise à jour d'EmuNest** depuis Réglages (releases GitHub ; dépôt privé : `github_token` dans `config.toml`).
+- **Mise à jour automatique d'EmuNest** (releases GitHub, jamais sur un exe compilé sur place). Dépôt privé : le jeton de `gh auth token` est utilisé à la demande, ou `github_token` dans `config.toml`.
+- **Restauration des sauvegardes** (Réglages › Sauvegardes de jeu) avec mise de côté de l'état actuel avant d'écraser.
+- **Sons de l'interface** synthétisés (aucun fichier audio), réglables ou coupables dans Réglages.
 
 Émulateurs pris en charge : Dolphin (GameCube, Wii), PCSX2 (PS2), DuckStation (PS1), PPSSPP (PSP), mGBA (GB/GBC/GBA),
 Ryujinx (Switch, manuel), Cemu (Wii U), RPCS3 (PS3), melonDS (DS), Azahar (3DS). Un profil = un petit fichier TOML dans
@@ -35,6 +37,9 @@ Ryujinx (Switch, manuel), Cemu (Wii U), RPCS3 (PS3), melonDS (DS), Azahar (3DS).
 ## Installation
 
 Télécharge `EmuNest-Setup-X.Y.Z.exe` (installeur, sans droits administrateur) ou le zip portable depuis les releases.
+EmuNest se met ensuite **à jour tout seul** (Réglages › Mises à jour) : chaque push sur `master` publie une nouvelle version.
+
+## Utilisation
 
 ```powershell
 cargo run --release -p emunest -- [--windowed] [dossier_de_roms]

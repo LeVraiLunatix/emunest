@@ -376,6 +376,17 @@ export component MainWindow inherits Window {
     in-out property <[string]> menu-items;
     in-out property <int> menu-index: 0;
     callback key-action(string) -> bool;
+    // sons de l'interface (joués côté Rust) : « move », « key », « open », « close »
+    callback sfx(string);
+    property <int> prev-dialog: 0;
+    changed sel => { root.sfx("move"); }
+    changed menu-index => { root.sfx("move"); }
+    changed kb-index => { root.sfx("move"); }
+    changed dialog-mode => {
+        if (root.dialog-mode != 0 && root.prev-dialog == 0) { root.sfx("open"); }
+        else if (root.dialog-mode == 0 && root.prev-dialog != 0) { root.sfx("close"); }
+        root.prev-dialog = root.dialog-mode;
+    }
     // galerie de captures
     in-out property <image> gallery-image;
     in-out property <string> gallery-pos;
@@ -396,6 +407,7 @@ export component MainWindow inherits Window {
     in-out property <int> dialog-mode: 0;
     in-out property <string> dialog-title;
     in-out property <string> dialog-text;
+    in-out property <string> dialog-accept-label: "Installer";
     in-out property <float> progress: 0;
     callback dialog-accept();
     callback dialog-cancel();
@@ -892,12 +904,17 @@ export component MainWindow inherits Window {
         }
 
         // ---------- Fenêtre modale ----------
-        if root.dialog-mode != 0: Rectangle {
+        if root.dialog-mode != 0: ov := Rectangle {
+            // ouverture animée : le fond se fonce en fondu pendant que la fenêtre glisse et apparaît
+            property <float> t: 0;
+            init => { self.t = 1; }
+            animate t { duration: 280ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
             x: 0;
             y: 0;
             width: (1920px * Scale.k);
             height: (1080px * Scale.k);
-            background: #05070ed0;
+            background: #04060cf0;
+            opacity: self.t;
             TouchArea { }
             if root.dialog-mode == 6: Rectangle {
                 x: 0;
@@ -961,8 +978,10 @@ export component MainWindow inherits Window {
                 width: (1120px * Scale.k);
                 height: root.dialog-mode == 4 ? (190px * Scale.k) + root.menu-items.length * (72px * Scale.k) : (root.dialog-mode == 5 && root.pad-active ? (700px * Scale.k) : (440px * Scale.k));
                 border-radius: (60px * Scale.k);
+                // fond presque opaque : le texte reste lisible quel que soit le décor derrière
+                background: @linear-gradient(180deg, #1c2238fc 0%, #0d111efe 100%);
                 x: ((1920px * Scale.k) - self.width) / 2;
-                y: ((1080px * Scale.k) - self.height) / 2;
+                y: ((1080px * Scale.k) - self.height) / 2 + (1 - ov.t) * (36px * Scale.k);
                 Text {
                     x: (72px * Scale.k);
                     y: (56px * Scale.k);
@@ -1027,7 +1046,7 @@ export component MainWindow inherits Window {
                     height: (56px * Scale.k);
                     spacing: (56px * Scale.k);
                     alignment: start;
-                    if !root.pad-active: KeyHint { key: "Entrée"; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Valider" : "Installer"; }
+                    if !root.pad-active: KeyHint { key: "Entrée"; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Valider" : root.dialog-accept-label; }
                     if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Taper" : "Installer"; }
                     if root.dialog-mode == 5 && root.pad-active: PadHint { role: "extra"; kind: root.pad-kind; label: "Effacer"; }
                     if root.dialog-mode == 5 && root.pad-active: PadHint { role: "north"; kind: root.pad-kind; label: "Espace"; }
@@ -1042,18 +1061,39 @@ export component MainWindow inherits Window {
                     width: parent.width - (104px * Scale.k);
                     height: root.menu-items.length * (72px * Scale.k);
                     for item[i] in root.menu-items: Rectangle {
+                        // chaque ligne arrive en glissant, l'une après l'autre
+                        property <float> appear: 0;
+                        property <bool> sel: i == root.menu-index;
+                        init => { self.appear = 1; }
+                        animate appear { duration: 300ms + i * 40ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
+                        x: (1 - self.appear) * (60px * Scale.k) + (sel ? (10px * Scale.k) : 0px);
+                        animate x { duration: 140ms; easing: ease-out; }
+                        opacity: self.appear;
+                        width: parent.width - (sel ? (10px * Scale.k) : 0px);
                         y: i * (72px * Scale.k);
                         height: (64px * Scale.k);
                         border-radius: (22px * Scale.k);
-                        background: i == root.menu-index ? accent.with-alpha(0.6) : #ffffff12;
-                        border-width: i == root.menu-index ? (2px * Scale.k) : (0px * Scale.k);
-                        border-color: #ffffffaa;
+                        // sélection : fond foncé de la couleur d'ambiance + liseré clair ; le texte blanc reste lisible
+                        background: sel ? accent.darker(0.45) : #ffffff1c;
+                        border-width: sel ? (3px * Scale.k) : (1px * Scale.k);
+                        border-color: sel ? #ffffffe6 : #ffffff22;
+                        animate background, border-width { duration: 140ms; easing: ease-out; }
+                        Rectangle {
+                            x: (14px * Scale.k);
+                            y: (16px * Scale.k);
+                            width: (6px * Scale.k);
+                            height: (32px * Scale.k);
+                            border-radius: (3px * Scale.k);
+                            background: accent.brighter(0.6);
+                            opacity: sel ? 1.0 : 0.0;
+                            animate opacity { duration: 140ms; }
+                        }
                         Text {
-                            x: (28px * Scale.k);
+                            x: (36px * Scale.k);
                             text: item;
-                            color: #ffffff;
+                            color: sel ? #ffffff : #e6ebf7;
                             font-size: (30px * Scale.k);
-                            font-weight: i == root.menu-index ? 800 : 500;
+                            font-weight: sel ? 800 : 500;
                             vertical-alignment: center;
                         }
                         TouchArea { clicked => { root.menu-activate(i); } }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "emulators", "ui", "app", "metadata"]
+members = ["core", "emulators", "ui", "app", "metadata", "sound"]
 
 [profile.release]
 lto = "thin"
