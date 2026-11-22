@@ -439,6 +439,8 @@ export component MainWindow inherits Window {
     // peu de jeux : la rangée tient dans l'écran, on la centre ; beaucoup : elle défile et boucle
     property <length> row-w: games.length * (tw + gap) + (sw - tw) - gap;
     out property <bool> loops: row-w + 2 * pad > (1920px * Scale.k);
+    // assez de jeux (11+) : vraie boucle infinie, les jaquettes tournent autour de la sélection au centre
+    property <bool> inf: games.length >= 11;
     property <length> off: loops ? (0px * Scale.k) : ((1920px * Scale.k) - row-w) / 2 - pad;
     // couleurs de l'ambiance = couleurs dominantes de la jaquette sélectionnée
     property <color> accent: games.length > 0 ? games[sel].p1.brighter(0.2) : #6b8cff;
@@ -768,11 +770,14 @@ export component MainWindow inherits Window {
             interactive: false;
             content-width: pad * 2 + games.length * (tw + gap) + (sw - tw) + (1920px * Scale.k) / 2;
             content-height: self.height;
-            content-x: loops ? -max((0px * Scale.k), pad + sel * (tw + gap) + sw / 2 - (1920px * Scale.k) / 2) : (0px * Scale.k);
+            content-x: (loops && !inf) ? -max((0px * Scale.k), pad + sel * (tw + gap) + sw / 2 - (1920px * Scale.k) / 2) : (0px * Scale.k);
             animate content-x { duration: 420ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
 
             for g[i] in root.games: tile := Rectangle {
                 property <bool> on: i == root.sel;
+                // position circulaire par rapport à la sélection : de -n/2 à n/2
+                property <int> d: Math.mod(i - root.sel + Math.floor(root.games.length / 2) + root.games.length, root.games.length) - Math.floor(root.games.length / 2);
+                property <length> c: ((1920px * Scale.k) - sw) / 2;
                 property <float> appear: 0;
                 property <float> sheen: on ? 1.0 : 0.0;
                 init => { self.appear = 1; }
@@ -787,9 +792,10 @@ export component MainWindow inherits Window {
                 property <length> w: h * g.aspect;
                 width: w;
                 height: h;
-                x: off + pad + i * (tw + gap) + (i > root.sel ? sw - tw : (0px * Scale.k)) + (slot - w) / 2;
+                x: (inf ? (d == 0 ? c : (d > 0 ? c + sw + gap + (d - 1) * (tw + gap) : c + d * (tw + gap))) : off + pad + i * (tw + gap) + (i > root.sel ? sw - tw : (0px * Scale.k))) + (slot - w) / 2;
                 y: (702px * Scale.k) - h + (60px * Scale.k) * (1 - appear);
-                opacity: appear;
+                // hors écran : on ne voit pas une jaquette traverser l'écran en repassant de l'autre côté
+                opacity: (inf && abs(d) > 4) ? 0 : appear;
                 animate x, y, width, height { duration: 420ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
 
                 // un clic sélectionne ; un second clic sur la jaquette sélectionnée lance le jeu
