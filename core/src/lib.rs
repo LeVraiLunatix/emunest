@@ -1,4 +1,5 @@
 //! Modèles, scan des ROMs et bibliothèque SQLite.
+pub mod config;
 pub mod install;
 pub mod launch;
 
@@ -15,8 +16,14 @@ pub struct Game {
     pub title: String,
     /// id de plateforme ("gc", "ps2"…)
     pub platform: String,
-    /// nom du profil d'émulateur associé
+    /// émulateur utilisé : celui choisi pour ce jeu, sinon celui du profil de la console
     pub emulator: String,
+    /// émulateur choisi à la main pour ce jeu (None = par défaut)
+    pub emu_override: Option<String>,
+    /// arguments ajoutés à la ligne de commande de l'émulateur
+    pub extra_args: String,
+    pub note: String,
+    pub collections: Vec<String>,
     pub favorite: bool,
     /// dernière partie (secondes Unix), 0 = jamais jouée
     pub last_played: i64,
@@ -90,12 +97,24 @@ impl Library {
                 platform TEXT NOT NULL, emulator TEXT NOT NULL);",
         )?;
         // migration des bases créées avant les favoris et les stats
-        for (col, def) in [("favorite", "INTEGER NOT NULL DEFAULT 0"), ("last_played", "INTEGER NOT NULL DEFAULT 0"), ("play_secs", "INTEGER NOT NULL DEFAULT 0")] {
+        for (col, def) in [
+            ("favorite", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_played", "INTEGER NOT NULL DEFAULT 0"),
+            ("play_secs", "INTEGER NOT NULL DEFAULT 0"),
+            ("note", "TEXT NOT NULL DEFAULT ''"),
+            ("emu_override", "TEXT"),
+            ("extra_args", "TEXT NOT NULL DEFAULT ''"),
+        ] {
             let has: bool = db.prepare("SELECT 1 FROM pragma_table_info('games') WHERE name=?1")?.exists([col])?;
             if !has {
                 db.execute_batch(&format!("ALTER TABLE games ADD COLUMN {col} {def};"))?;
             }
         }
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS collections (name TEXT PRIMARY KEY);
+             CREATE TABLE IF NOT EXISTS collection_games (
+                collection TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY (collection, path));",
+        )?;
         Ok(Self { db })
     }
 
@@ -130,21 +149,93 @@ impl Library {
     }
 
     pub fn games(&self) -> Result<Vec<Game>> {
+        let mut memberships: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        {
+            let mut st = self.db.prepare("SELECT path, collection FROM collection_games ORDER BY collection COLLATE NOCASE")?;
+            for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+                let (path, c) = row?;
+                memberships.entry(path).or_default().push(c);
+            }
+        }
         let mut st = self.db.prepare(
-            "SELECT path,title,platform,emulator,favorite,last_played,play_secs FROM games ORDER BY title COLLATE NOCASE",
+            "SELECT path,title,platform,COALESCE(emu_override, emulator),emu_override,extra_args,note,
+                    favorite,last_played,play_secs FROM games ORDER BY title COLLATE NOCASE",
         )?;
         let rows = st.query_map([], |r| {
+            let path: String = r.get(0)?;
             Ok(Game {
-                path: r.get::<_, String>(0)?.into(),
+                collections: memberships.get(&path).cloned().unwrap_or_default(),
+                path: path.into(),
                 title: r.get(1)?,
                 platform: r.get(2)?,
                 emulator: r.get(3)?,
-                favorite: r.get::<_, i64>(4)? != 0,
-                last_played: r.get(5)?,
-                play_secs: r.get(6)?,
+                emu_override: r.get(4)?,
+                extra_args: r.get(5)?,
+                note: r.get(6)?,
+                favorite: r.get::<_, i64>(7)? != 0,
+                last_played: r.get(8)?,
+                play_secs: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Noms de toutes les collections (même vides).
+    pub fn collections(&self) -> Result<Vec<String>> {
+        let mut st = self.db.prepare("SELECT name FROM collections ORDER BY name COLLATE NOCASE")?;
+        let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn create_collection(&self, name: &str) -> Result<()> {
+        self.db.execute("INSERT OR IGNORE INTO collections (name) VALUES (?1)", [name.trim()])?;
+        Ok(())
+    }
+
+    pub fn delete_collection(&self, name: &str) -> Result<()> {
+        self.db.execute("DELETE FROM collection_games WHERE collection=?1", [name])?;
+        self.db.execute("DELETE FROM collections WHERE name=?1", [name])?;
+        Ok(())
+    }
+
+    pub fn add_to_collection(&self, name: &str, path: &Path) -> Result<()> {
+        self.create_collection(name)?;
+        self.db.execute(
+            "INSERT OR IGNORE INTO collection_games (collection, path) VALUES (?1, ?2)",
+            params![name.trim(), path.to_string_lossy()],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_from_collection(&self, name: &str, path: &Path) -> Result<()> {
+        self.db.execute("DELETE FROM collection_games WHERE collection=?1 AND path=?2", params![name, path.to_string_lossy()])?;
+        Ok(())
+    }
+
+    pub fn set_note(&self, path: &Path, note: &str) -> Result<()> {
+        self.db.execute("UPDATE games SET note=?2 WHERE path=?1", params![path.to_string_lossy(), note.trim()])?;
+        Ok(())
+    }
+
+    /// Émulateur choisi pour ce jeu (None = revenir à celui de la console).
+    pub fn set_emulator(&self, path: &Path, emulator: Option<&str>) -> Result<()> {
+        self.db.execute("UPDATE games SET emu_override=?2 WHERE path=?1", params![path.to_string_lossy(), emulator])?;
+        Ok(())
+    }
+
+    pub fn set_extra_args(&self, path: &Path, args: &str) -> Result<()> {
+        self.db.execute("UPDATE games SET extra_args=?2 WHERE path=?1", params![path.to_string_lossy(), args.trim()])?;
+        Ok(())
+    }
+
+    /// Oublie les jeux situés sous `dir` (dossier de ROMs retiré des réglages).
+    pub fn remove_under(&self, dir: &Path) -> Result<()> {
+        let prefix = dir.to_string_lossy().into_owned();
+        let n = prefix.chars().count() as i64;
+        for table in ["games", "collection_games"] {
+            self.db.execute(&format!("DELETE FROM {table} WHERE substr(path, 1, ?2) = ?1"), params![prefix, n])?;
+        }
+        Ok(())
     }
 
     pub fn set_favorite(&self, path: &Path, favorite: bool) -> Result<()> {
@@ -208,6 +299,40 @@ mod tests {
         lib.scan(&root, &profiles).unwrap(); // un rescan ne doit rien effacer
         let g = &lib.games().unwrap()[0];
         assert!(g.favorite && g.play_secs == 120 && g.last_played > 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn collections_notes_and_overrides() {
+        let root = std::env::temp_dir().join(format!("emunest-coll-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("ps2")).unwrap();
+        std::fs::write(root.join("ps2/Game A.iso"), b"x").unwrap();
+        let profiles = emunest_emulators::builtin_profiles().unwrap();
+        let mut lib = Library::open_in_memory().unwrap();
+        lib.scan(&root, &profiles).unwrap();
+        let rom = lib.games().unwrap()[0].path.clone();
+
+        lib.add_to_collection("À finir", &rom).unwrap();
+        lib.create_collection("Vide").unwrap();
+        lib.set_note(&rom, "  chapitre 3  ").unwrap();
+        lib.set_emulator(&rom, Some("RPCS3")).unwrap();
+        lib.set_extra_args(&rom, "--nogui").unwrap();
+        lib.scan(&root, &profiles).unwrap(); // un rescan ne doit rien effacer
+        let g = &lib.games().unwrap()[0];
+        assert_eq!(g.collections, vec!["À finir".to_string()]);
+        assert_eq!((g.note.as_str(), g.emulator.as_str(), g.extra_args.as_str()), ("chapitre 3", "RPCS3", "--nogui"));
+        let mut names = lib.collections().unwrap();
+        names.sort();
+        assert_eq!(names, vec!["Vide".to_string(), "À finir".to_string()]);
+
+        lib.set_emulator(&rom, None).unwrap();
+        lib.remove_from_collection("À finir", &rom).unwrap();
+        lib.delete_collection("Vide").unwrap();
+        let g = &lib.games().unwrap()[0];
+        assert_eq!(g.emulator, "PCSX2");
+        assert!(g.collections.is_empty());
+        assert_eq!(lib.collections().unwrap(), vec!["À finir".to_string()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

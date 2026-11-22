@@ -21,6 +21,7 @@ enum Filter {
     Favorites,
     Recent,
     Platform(String),
+    Collection(String),
 }
 
 impl Filter {
@@ -30,20 +31,26 @@ impl Filter {
             Filter::Favorites => "Favoris".into(),
             Filter::Recent => "Récents".into(),
             Filter::Platform(p) => platform_name(p).into(),
+            Filter::Collection(c) => c.clone(),
         }
     }
 }
 
-/// Actions du menu Options d'un jeu ; les actions qui touchent au système sont exécutées par l'application.
+/// Entrées de menu : les premières sont celles du menu Options d'un jeu ; `Item(n)` est une entrée de sous-menu
+/// dont l'application connaît le sens (elle l'a construite).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MenuAction {
     Play,
     ToggleFavorite,
+    Collections,
+    Notes,
+    GameSettings,
     OpenEmulator,
     UpdateEmulator,
     OpenFolder,
-    ChooseCover,
-    RefetchCover,
+    Cover,
+    AppSettings,
+    Item(u32),
 }
 
 /// Images déjà décodées d'un jeu (évite de relire les fichiers à chaque filtre ou frappe).
@@ -64,9 +71,11 @@ struct View {
     query: String,
     searching: bool,
     menu: Vec<MenuAction>,
+    collections: Vec<String>,
     art: HashMap<PathBuf, Art>,
     on_favorite: Option<Rc<dyn Fn(Game)>>,
-    on_menu: Option<Rc<dyn Fn(MenuAction, Game)>>,
+    on_menu: Option<Rc<dyn Fn(MenuAction, Option<Game>)>>,
+    on_settings: Option<Rc<dyn Fn()>>,
 }
 
 thread_local! {
@@ -75,6 +84,8 @@ thread_local! {
     static TOAST: Timer = Timer::default();
     // réponse en attente à la question affichée
     static ANSWER: RefCell<Option<Sender<Answer>>> = RefCell::new(None);
+    // saisie de texte en cours (nom de collection, note…) : texte tapé + canal de réponse
+    static PROMPT: RefCell<Option<(String, Sender<Option<String>>)>> = RefCell::new(None);
 }
 
 /// Appelle `f` avec le jeu choisi (Entrée, bouton Jouer ou clic sur la jaquette sélectionnée).
@@ -91,9 +102,19 @@ pub fn on_favorite(f: impl Fn(Game) + 'static) {
     VIEW.with_borrow_mut(|v| v.on_favorite = Some(Rc::new(f)));
 }
 
-/// Appelle `f` pour les actions du menu Options qui touchent au système (hors lancer / favori).
-pub fn on_menu(f: impl Fn(MenuAction, Game) + 'static) {
+/// Appelle `f` pour les actions des menus (le jeu est celui sélectionné, s'il y en a un).
+pub fn on_menu(f: impl Fn(MenuAction, Option<Game>) + 'static) {
     VIEW.with_borrow_mut(|v| v.on_menu = Some(Rc::new(f)));
+}
+
+/// Appelle `f` quand l'utilisateur ouvre les réglages d'EmuNest (touche S).
+pub fn on_settings(f: impl Fn() + 'static) {
+    VIEW.with_borrow_mut(|v| v.on_settings = Some(Rc::new(f)));
+}
+
+/// Noms des collections existantes (à appeler avant `set_games`). Thread UI.
+pub fn set_collections(names: Vec<String>) {
+    VIEW.with_borrow_mut(|v| v.collections = names);
 }
 
 fn current_game(win: &MainWindow) -> Option<Game> {
@@ -165,8 +186,8 @@ pub fn pad_input(win: &MainWindow, input: Pad) {
         }
         mode => {
             match input {
-                Pad::Accept if matches!(mode, 1 | 3) => win.invoke_dialog_accept(),
-                Pad::Back if matches!(mode, 1 | 3) => win.invoke_dialog_cancel(),
+                Pad::Accept if matches!(mode, 1 | 3 | 5) => win.invoke_dialog_accept(),
+                Pad::Back if matches!(mode, 1 | 3 | 5) => win.invoke_dialog_cancel(),
                 Pad::Extra if mode == 3 => win.invoke_dialog_extra(),
                 _ => {}
             }
@@ -270,6 +291,16 @@ fn stats_text(g: &Game) -> String {
     format!("{fav}{} jouées  ·  {when}", duration_text(g.play_secs))
 }
 
+/// Statistiques + note du joueur (tronquée) sur une seule ligne.
+fn hero_line(g: &Game) -> String {
+    let mut line = stats_text(g);
+    if !g.note.is_empty() {
+        let note: String = g.note.chars().take(70).collect();
+        line.push_str(&format!("  ·  « {note} »"));
+    }
+    line
+}
+
 fn item(g: &Game, v: &mut View) -> GameItem {
     let (color, color2) = platform_colors(&g.platform);
     let cache = v.cache.clone();
@@ -300,7 +331,7 @@ fn item(g: &Game, v: &mut View) -> GameItem {
             |c| c.size().width as f32 / c.size().height.max(1) as f32,
         ),
         favorite: g.favorite,
-        stats: stats_text(g).into(),
+        stats: hero_line(g).into(),
         has_cover: art.cover.is_some(),
         cover: art.cover.unwrap_or_default(),
         color,
@@ -309,7 +340,7 @@ fn item(g: &Game, v: &mut View) -> GameItem {
 }
 
 /// Filtres proposés d'après la bibliothèque : Tout, Favoris et Récents s'ils servent, puis les consoles présentes.
-fn filters_of(all: &[Game]) -> Vec<Filter> {
+fn filters_of(all: &[Game], collections: &[String]) -> Vec<Filter> {
     let mut f = vec![Filter::All];
     if all.iter().any(|g| g.favorite) {
         f.push(Filter::Favorites);
@@ -321,6 +352,7 @@ fn filters_of(all: &[Game]) -> Vec<Filter> {
     platforms.sort_by_key(|p| platform_name(p).to_string());
     platforms.dedup();
     f.extend(platforms.into_iter().map(|p| Filter::Platform(p.to_string())));
+    f.extend(collections.iter().map(|c| Filter::Collection(c.clone())));
     f
 }
 
@@ -329,7 +361,7 @@ fn filters_of(all: &[Game]) -> Vec<Filter> {
 fn apply(win: &MainWindow, keep_selection: bool) {
     let prev = if keep_selection { current_game(win).map(|g| g.path) } else { None };
     let (items, labels, filter_idx, query, searching) = VIEW.with_borrow_mut(|v| {
-        let filters = filters_of(&v.all);
+        let filters = filters_of(&v.all, &v.collections);
         if !filters.contains(&v.filter) {
             v.filter = Filter::All;
         }
@@ -342,6 +374,7 @@ fn apply(win: &MainWindow, keep_selection: bool) {
                 Filter::Favorites => g.favorite,
                 Filter::Recent => g.last_played > 0,
                 Filter::Platform(p) => &g.platform == p,
+                Filter::Collection(c) => g.collections.contains(c),
             })
             .filter(|g| q.is_empty() || g.title.to_lowercase().contains(&q))
             .cloned()
@@ -370,7 +403,7 @@ fn apply(win: &MainWindow, keep_selection: bool) {
 
 fn select_filter(win: &MainWindow, index: usize) {
     VIEW.with_borrow_mut(|v| {
-        if let Some(f) = filters_of(&v.all).into_iter().nth(index) {
+        if let Some(f) = filters_of(&v.all, &v.collections).into_iter().nth(index) {
             v.filter = f;
         }
     });
@@ -379,7 +412,7 @@ fn select_filter(win: &MainWindow, index: usize) {
 
 fn step_filter(win: &MainWindow, d: i32) {
     let (n, cur) = VIEW.with_borrow(|v| {
-        let f = filters_of(&v.all);
+        let f = filters_of(&v.all, &v.collections);
         (f.len() as i32, f.iter().position(|x| *x == v.filter).unwrap_or(0) as i32)
     });
     select_filter(win, (cur + d).rem_euclid(n.max(1)) as usize);
@@ -392,25 +425,44 @@ fn toggle_favorite(win: &MainWindow) {
     }
 }
 
-/// Ouvre le menu Options du jeu sélectionné.
-fn open_menu(win: &MainWindow) {
-    let Some(g) = current_game(win) else { return };
-    let entries = [
-        (MenuAction::Play, "Jouer".to_string()),
-        (MenuAction::ToggleFavorite, if g.favorite { "Retirer des favoris" } else { "Ajouter aux favoris" }.to_string()),
-        (MenuAction::OpenEmulator, format!("Ouvrir {} (réglages)", g.emulator)),
-        (MenuAction::UpdateEmulator, format!("Mettre à jour {}", g.emulator)),
-        (MenuAction::OpenFolder, "Ouvrir le dossier du jeu".to_string()),
-        (MenuAction::ChooseCover, "Choisir une jaquette…".to_string()),
-        (MenuAction::RefetchCover, "Rechercher la jaquette à nouveau".to_string()),
-    ];
+/// Affiche un menu modal : une ligne par entrée, la première est sélectionnée.
+pub fn show_menu(win: &MainWindow, title: &str, entries: Vec<(MenuAction, String)>) {
     VIEW.with_borrow_mut(|v| v.menu = entries.iter().map(|(a, _)| *a).collect());
     let labels: Vec<SharedString> = entries.iter().map(|(_, l)| l.as_str().into()).collect();
     win.set_menu_items(ModelRc::new(VecModel::from(labels)));
     win.set_menu_index(0);
-    win.set_dialog_title(g.title.as_str().into());
+    win.set_dialog_title(title.into());
     win.set_dialog_text("".into());
     win.set_dialog_mode(4);
+}
+
+/// Saisie de texte : la réponse (`None` si annulée) part sur `tx`. Thread UI.
+pub fn ask_text(win: &MainWindow, title: &str, initial: &str, tx: Sender<Option<String>>) {
+    PROMPT.with_borrow_mut(|p| *p = Some((initial.to_string(), tx)));
+    win.set_dialog_title(title.into());
+    win.set_dialog_text(initial.into());
+    win.set_dialog_mode(5);
+}
+
+/// Ouvre le menu Options du jeu sélectionné.
+fn open_menu(win: &MainWindow) {
+    let Some(g) = current_game(win) else { return };
+    show_menu(
+        win,
+        &g.title,
+        vec![
+            (MenuAction::Play, "Jouer".to_string()),
+            (MenuAction::ToggleFavorite, if g.favorite { "Retirer des favoris" } else { "Ajouter aux favoris" }.to_string()),
+            (MenuAction::Collections, "Collections…".to_string()),
+            (MenuAction::Notes, "Notes du jeu…".to_string()),
+            (MenuAction::GameSettings, "Réglages du jeu…".to_string()),
+            (MenuAction::OpenEmulator, format!("Ouvrir {} (réglages)", g.emulator)),
+            (MenuAction::UpdateEmulator, format!("Mettre à jour {}", g.emulator)),
+            (MenuAction::OpenFolder, "Ouvrir le dossier du jeu".to_string()),
+            (MenuAction::Cover, "Jaquette…".to_string()),
+            (MenuAction::AppSettings, "Réglages d'EmuNest…".to_string()),
+        ],
+    );
 }
 
 /// Touches qui ne sont pas de la navigation : recherche (« / » puis on tape), Tab = console suivante,
@@ -423,6 +475,24 @@ fn key_action(win: &MainWindow, text: &str) -> bool {
     let mut chars = text.chars();
     let (Some(c), None) = (chars.next(), chars.next()) else { return false };
     let typed = !c.is_control() && !('\u{e000}'..='\u{f8ff}').contains(&c); // exclut les touches de navigation de Slint
+    // saisie de texte en cours (fenêtre modale) : tout ce qui se tape va dans le champ
+    if PROMPT.with_borrow(|p| p.is_some()) {
+        let text = PROMPT.with_borrow_mut(|p| {
+            let (t, _) = p.as_mut()?;
+            match c {
+                '\u{8}' => {
+                    t.pop();
+                }
+                c if typed && t.chars().count() < 80 => t.push(c),
+                _ => return None,
+            }
+            Some(t.clone())
+        });
+        if let Some(t) = text {
+            win.set_dialog_text(t.into());
+        }
+        return true;
+    }
     let searching = VIEW.with_borrow(|v| v.searching);
     if searching {
         VIEW.with_borrow_mut(|v| match c {
@@ -452,6 +522,11 @@ fn key_action(win: &MainWindow, text: &str) -> bool {
         '\u{19}' => step_filter(win, -1),
         'o' | 'O' => open_menu(win),
         'f' | 'F' => toggle_favorite(win),
+        's' | 'S' => {
+            if let Some(cb) = VIEW.with_borrow(|v| v.on_settings.clone()) {
+                cb();
+            }
+        }
         '\u{1b}' => {
             let active = VIEW.with_borrow(|v| !v.query.is_empty() || v.filter != Filter::All);
             if !active {
@@ -559,15 +634,56 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
         let Some(w) = weak.upgrade() else { return };
         w.set_dialog_mode(0);
         let action = VIEW.with_borrow(|v| v.menu.get(i as usize).copied());
-        let (Some(action), Some(game)) = (action, current_game(&w)) else { return };
-        match action {
-            MenuAction::Play => w.invoke_launch(w.get_current()),
-            MenuAction::ToggleFavorite => toggle_favorite(&w),
-            other => {
+        let Some(action) = action else { return };
+        let game = current_game(&w);
+        match (action, &game) {
+            (MenuAction::Play, Some(_)) => w.invoke_launch(w.get_current()),
+            (MenuAction::ToggleFavorite, Some(_)) => toggle_favorite(&w),
+            _ => {
                 if let Some(cb) = VIEW.with_borrow(|v| v.on_menu.clone()) {
-                    cb(other, game);
+                    cb(action, game);
                 }
             }
+        }
+    });
+    let weak = win.as_weak();
+    win.on_dialog_accept(move || {
+        if let Some(w) = weak.upgrade() {
+            match w.get_dialog_mode() {
+                5 => {
+                    // saisie de texte validée
+                    if let Some((text, tx)) = PROMPT.with_borrow_mut(|p| p.take()) {
+                        let _ = tx.send(Some(text));
+                    }
+                    w.set_dialog_mode(0);
+                    return;
+                }
+                1 => {
+                    w.set_progress(0.0);
+                    w.set_dialog_mode(2); // la progression prend la suite sans clignoter
+                }
+                _ => {}
+            }
+        }
+        if let Some(tx) = ANSWER.with_borrow_mut(|a| a.take()) {
+            let _ = tx.send(Answer::Yes);
+        }
+    });
+    win.on_dialog_extra(|| {
+        if let Some(tx) = ANSWER.with_borrow_mut(|a| a.take()) {
+            let _ = tx.send(Answer::Extra);
+        }
+    });
+    let weak = win.as_weak();
+    win.on_dialog_cancel(move || {
+        if let Some(w) = weak.upgrade() {
+            w.set_dialog_mode(0);
+        }
+        if let Some((_, tx)) = PROMPT.with_borrow_mut(|p| p.take()) {
+            let _ = tx.send(None);
+        }
+        if let Some(tx) = ANSWER.with_borrow_mut(|a| a.take()) {
+            let _ = tx.send(Answer::No);
         }
     });
     win.on_quit(|| {

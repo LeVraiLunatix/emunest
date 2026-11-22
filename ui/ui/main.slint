@@ -901,25 +901,36 @@ export component MainWindow inherits Window {
                     font-weight: 800;
                     overflow: elide;
                 }
-                Text {
+                if root.dialog-mode == 5: Rectangle {
                     x: (72px * Scale.k);
-                    y: (140px * Scale.k);
+                    y: (130px * Scale.k);
                     width: parent.width - (144px * Scale.k);
-                    height: (170px * Scale.k);
-                    text: root.dialog-text;
-                    wrap: word-wrap;
+                    height: (84px * Scale.k);
+                    border-radius: (24px * Scale.k);
+                    background: #00000066;
+                    border-width: (2px * Scale.k);
+                    border-color: accent;
+                }
+                Text {
+                    x: root.dialog-mode == 5 ? (96px * Scale.k) : (72px * Scale.k);
+                    y: root.dialog-mode == 5 ? (130px * Scale.k) : (140px * Scale.k);
+                    width: parent.width - (192px * Scale.k);
+                    height: root.dialog-mode == 5 ? (84px * Scale.k) : (170px * Scale.k);
+                    vertical-alignment: root.dialog-mode == 5 ? TextVerticalAlignment.center : TextVerticalAlignment.top;
+                    text: root.dialog-mode == 5 ? root.dialog-text + "|" : root.dialog-text;
+                    wrap: root.dialog-mode == 5 ? TextWrap.no-wrap : TextWrap.word-wrap;
                     color: #c3c9d8;
                     font-size: (28px * Scale.k);
                 }
-                if root.dialog-mode == 1 || root.dialog-mode == 3: HorizontalLayout {
+                if root.dialog-mode == 1 || root.dialog-mode == 3 || root.dialog-mode == 5: HorizontalLayout {
                     x: (72px * Scale.k);
                     y: (324px * Scale.k);
                     width: parent.width - (144px * Scale.k);
                     height: (56px * Scale.k);
                     spacing: (56px * Scale.k);
                     alignment: start;
-                    if !root.pad-active: KeyHint { key: "Entrée"; label: root.dialog-mode == 3 ? "Vérifier" : "Installer"; }
-                    if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: root.dialog-mode == 3 ? "Vérifier" : "Installer"; }
+                    if !root.pad-active: KeyHint { key: "Entrée"; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Valider" : "Installer"; }
+                    if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Valider" : "Installer"; }
                     if root.dialog-mode == 3 && !root.pad-active: KeyHint { key: "O"; label: "Ouvrir le dossier"; }
                     if root.dialog-mode == 3 && root.pad-active: PadHint { role: "extra"; kind: root.pad-kind; label: "Ouvrir le dossier"; }
                     if !root.pad-active: KeyHint { key: "Échap"; label: "Annuler"; }
@@ -988,6 +999,11 @@ export component MainWindow inherits Window {
                 if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Return) { root.dialog-accept(); }
                 else if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Escape) { root.dialog-cancel(); }
                 else if (root.dialog-mode == 3 && (e.text == "o" || e.text == "O")) { root.dialog-extra(); }
+                else if (root.dialog-mode == 5) {
+                    if (e.text == Key.Return) { root.dialog-accept(); }
+                    else if (e.text == Key.Escape) { root.dialog-cancel(); }
+                    else { root.key-action(e.text); }
+                }
                 else if (root.dialog-mode == 4) {
                     if (e.text == Key.UpArrow) { root.menu-index = max(root.menu-index - 1, 0); }
                     else if (e.text == Key.DownArrow) { root.menu-index = min(root.menu-index + 1, root.menu-items.length - 1); }

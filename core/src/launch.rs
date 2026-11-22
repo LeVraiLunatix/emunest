@@ -3,31 +3,9 @@
 //! puis dans le dossier géré `<data>/emulators/<nom en minuscules>/` (là où l'installeur le mettra).
 use anyhow::{bail, Context, Result};
 use emunest_emulators::{Profile, Requirement};
-use serde::Deserialize;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use walkdir::WalkDir;
-
-#[derive(Debug, Default, Deserialize)]
-struct Config {
-    /// dossier de ROMs par défaut (sinon : argument de la ligne de commande)
-    roms: Option<PathBuf>,
-    #[serde(default)]
-    emulators: HashMap<String, PathBuf>,
-}
-
-fn read_config(data: &Path) -> Config {
-    std::fs::read_to_string(data.join("config.toml"))
-        .ok()
-        .and_then(|s| toml::from_str(&s).map_err(|e| tracing::warn!("config.toml : {e}")).ok())
-        .unwrap_or_default()
-}
-
-/// Dossier de ROMs indiqué dans config.toml (`roms = 'D:\\Jeux'`).
-pub fn roms_dir(data: &Path) -> Option<PathBuf> {
-    read_config(data).roms
-}
 
 /// Dossier où EmuNest range les émulateurs qu'il gère.
 pub fn managed_dir(data: &Path, profile: &Profile) -> PathBuf {
@@ -36,7 +14,7 @@ pub fn managed_dir(data: &Path, profile: &Profile) -> PathBuf {
 
 /// Chemin de l'exécutable de l'émulateur, s'il est installé.
 pub fn find_executable(data: &Path, profile: &Profile) -> Option<PathBuf> {
-    let cfg = read_config(data);
+    let cfg = crate::config::load(data);
     if let Some(p) = cfg.emulators.get(&profile.name).filter(|p| p.is_file()) {
         return Some(p.clone());
     }
@@ -104,13 +82,43 @@ pub fn missing_files<'a>(exe: &Path, profile: &'a Profile) -> Vec<&'a Requiremen
         .collect()
 }
 
-/// Démarre l'émulateur sur `rom` (`{rom}` est remplacé dans les arguments du profil).
-pub fn launch(exe: &Path, profile: &Profile, rom: &Path) -> Result<Child> {
+/// Découpe une ligne d'arguments sur les espaces ; les guillemets doubles regroupent (`--cfg "mon fichier.ini"`).
+pub fn split_args(s: &str) -> Vec<String> {
+    let (mut out, mut cur, mut quoted, mut any) = (Vec::new(), String::new(), false, false);
+    for c in s.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                any = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if any || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                    any = false;
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if any || !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Démarre l'émulateur sur `rom` (`{rom}` est remplacé dans les arguments du profil ; `extra` est ajouté avant la ROM).
+pub fn launch(exe: &Path, profile: &Profile, rom: &Path, extra: &str) -> Result<Child> {
     if !rom.is_file() {
         bail!("le fichier {} n'existe plus", rom.display());
     }
     let rom = rom.to_string_lossy();
-    let args = profile.launch_args.iter().map(|a| a.replace("{rom}", &rom));
+    // les arguments du profil, avec les arguments du joueur insérés juste avant la ROM (ou ajoutés à la fin)
+    let mut args: Vec<String> = profile.launch_args.iter().map(|a| a.replace("{rom}", &rom)).collect();
+    let extra = split_args(extra);
+    let pos = profile.launch_args.iter().position(|a| a.contains("{rom}")).unwrap_or(args.len());
+    // si la ROM suit un « -- », les options du joueur doivent passer avant ce séparateur
+    let pos = if pos > 0 && profile.launch_args[pos - 1] == "--" { pos - 1 } else { pos };
+    args.splice(pos..pos, extra);
     Command::new(exe)
         .args(args)
         .current_dir(exe.parent().unwrap_or(Path::new(".")))
@@ -142,9 +150,9 @@ mod tests {
             requires: vec![],
         };
         let exe = PathBuf::from(std::env::var("COMSPEC").unwrap());
-        let status = launch(&exe, &profile, &rom).unwrap().wait().unwrap();
+        let status = launch(&exe, &profile, &rom, "").unwrap().wait().unwrap();
         assert_eq!(status.code(), Some(7));
-        assert!(launch(&exe, &profile, &dir.join("missing.iso")).is_err());
+        assert!(launch(&exe, &profile, &dir.join("missing.iso"), "").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -163,5 +171,11 @@ mod tests {
         std::fs::write(dir.join("bios").join("scph.BIN"), vec![0u8; 4 * 1024 * 1024]).unwrap();
         assert!(missing_files(&exe, &profile).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn splits_arguments_with_quotes() {
+        assert_eq!(split_args(r#"-a --cfg "mon fichier.ini" -b"#), ["-a", "--cfg", "mon fichier.ini", "-b"]);
+        assert!(split_args("   ").is_empty());
     }
 }
