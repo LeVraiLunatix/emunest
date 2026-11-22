@@ -831,7 +831,8 @@ fn main() -> Result<()> {
     let data = data_dir();
     let intro = {
         let cfg = config::load(&data);
-        if emunest_sound::init(cfg.sound, cfg.volume) {
+        // <données>/sounds : bell.* et chime.* facultatifs (échantillons choisis par l'utilisateur)
+        if emunest_sound::init(cfg.sound, cfg.volume, Some(&data.join("sounds"))) {
             // l'animation de démarrage a son propre son ; sans elle, un simple accord
             emunest_sound::play(if cfg.intro { emunest_sound::Sound::Intro } else { emunest_sound::Sound::Start });
         }

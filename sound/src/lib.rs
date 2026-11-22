@@ -1,5 +1,7 @@
 //! Sons de l'interface, synthétisés au démarrage (aucun fichier audio) : tintements de verre doux,
 //! arpèges courts, un peu de réverbération. Joués sur le périphérique par défaut dans un thread dédié.
+pub mod bank;
+
 use rodio::buffer::SamplesBuffer;
 use std::collections::HashMap;
 use std::num::NonZero;
@@ -54,7 +56,7 @@ fn n(secs: f32) -> usize {
 
 /// Note douce : partiels harmoniques, attaque en « smoothstep », décroissance exponentielle et petit glissando
 /// de hauteur vers la note (`glide` = écart relatif de départ, ex. -0.08 = part 8 % plus bas) qui donne le côté « bloop ».
-fn tone(freq: f32, secs: f32, attack: f32, decay: f32, partials: &[(f32, f32)], glide: f32, amp: f32) -> Vec<f32> {
+fn synth_tone(freq: f32, secs: f32, attack: f32, decay: f32, partials: &[(f32, f32)], glide: f32, amp: f32) -> Vec<f32> {
     let mut phase = 0.0f32;
     let total = n(secs);
     (0..total)
@@ -181,8 +183,46 @@ fn pad(freq: f32, secs: f32, attack: f32, release: f32, amp: f32) -> Vec<f32> {
         .collect()
 }
 
+/// Échantillons de l'utilisateur (facultatifs) : `bell` pour les notes courtes, `chime` pour les notes longues et résonantes.
+/// Sans eux, tout est synthétisé.
+#[derive(Default, Clone, Debug)]
+pub struct Bank {
+    pub bell: Option<bank::Sample>,
+    pub chime: Option<bank::Sample>,
+}
+
+/// Charge `bell.*` et `chime.*` (wav, ogg, flac, mp3) du dossier ; un fichier illisible est simplement ignoré.
+pub fn load_bank(dir: &std::path::Path) -> Bank {
+    let find = |stem: &str| -> Option<bank::Sample> {
+        std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
+            p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(stem))
+        }).and_then(|p| bank::load(&p).map_err(|e| tracing::warn!("échantillon ignoré : {e:#}")).ok())
+    };
+    Bank { bell: find("bell"), chime: find("chime") }
+}
+
+/// Une note : l'échantillon de l'utilisateur à la bonne hauteur s'il y en a un, sinon la synthèse.
+/// Les notes longues (≥ 0,45 s) préfèrent le `chime`, les courtes le `bell`.
+#[allow(clippy::too_many_arguments)]
+fn voice(bank: &Bank, freq: f32, secs: f32, attack: f32, decay: f32, partials: &[(f32, f32)], glide: f32, amp: f32) -> Vec<f32> {
+    let sample = if secs >= 0.45 { bank.chime.as_ref().or(bank.bell.as_ref()) } else { bank.bell.as_ref() };
+    match sample {
+        Some(s) => s.note(freq, secs, attack.max(0.006), decay.max(0.04), amp),
+        None => synth_tone(freq, secs, attack, decay, partials, glide, amp),
+    }
+}
+
+#[cfg(test)]
 fn render(sound: Sound) -> Vec<f32> {
+    render_with(sound, &Bank::default())
+}
+
+fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
     use Sound::*;
+    // même nom et mêmes paramètres que la synthèse : chaque note passe par l'échantillon s'il existe
+    let tone = |freq: f32, secs: f32, attack: f32, decay: f32, partials: &[(f32, f32)], glide: f32, amp: f32| {
+        voice(bank, freq, secs, attack, decay, partials, glide, amp)
+    };
     match sound {
         // déplacement : une goutte douce, à peine perceptible
         Move => finish(tone(392.0, 0.16, 0.010, 0.050, ROUND, -0.06, 1.0), 0.17),
@@ -310,8 +350,13 @@ fn render(sound: Sound) -> Vec<f32> {
 
 /// Tous les sons rendus en mémoire (pour les tests et l'aperçu WAV).
 pub fn render_all() -> Vec<(Sound, Vec<f32>)> {
+    render_all_with(&Bank::default())
+}
+
+/// Idem, avec les échantillons de l'utilisateur.
+pub fn render_all_with(bank: &Bank) -> Vec<(Sound, Vec<f32>)> {
     use Sound::*;
-    [Move, Filter, Select, Back, Open, Close, Launch, Favorite, Key, Toast, Error, Start, Intro].into_iter().map(|s| (s, render(s))).collect()
+    [Move, Filter, Select, Back, Open, Close, Launch, Favorite, Key, Toast, Error, Start, Intro].into_iter().map(|s| (s, render_with(s, bank))).collect()
 }
 
 /// Écrit un WAV 16 bits mono (aperçu hors application).
@@ -348,13 +393,14 @@ struct Player {
 static PLAYER: OnceLock<Player> = OnceLock::new();
 
 /// Démarre le thread audio. Renvoie vrai si un périphérique audio a été ouvert ; sinon tout reste silencieux (aucune erreur).
-pub fn init(enabled: bool, volume: f32) -> bool {
+pub fn init(enabled: bool, volume: f32, sounds_dir: Option<&std::path::Path>) -> bool {
     let (tx, rx) = channel::<Sound>();
     let player = Player { tx: Mutex::new(tx), enabled: AtomicBool::new(enabled), volume: AtomicU32::new((volume.clamp(0.0, 1.0) * 1000.0) as u32) };
     if PLAYER.set(player).is_err() {
         return true;
     }
     let (ready_tx, ready_rx) = channel::<bool>();
+    let sounds_dir = sounds_dir.map(|d| d.to_path_buf());
     std::thread::spawn(move || {
         let sink = match rodio::DeviceSinkBuilder::open_default_sink() {
             Ok(s) => s,
@@ -365,7 +411,11 @@ pub fn init(enabled: bool, volume: f32) -> bool {
             }
         };
         let _ = ready_tx.send(true);
-        let buffers: HashMap<Sound, Vec<f32>> = render_all().into_iter().collect();
+        let bank = sounds_dir.as_deref().map(load_bank).unwrap_or_default();
+        if bank.bell.is_some() || bank.chime.is_some() {
+            tracing::info!("sons : échantillons de l'utilisateur chargés");
+        }
+        let buffers: HashMap<Sound, Vec<f32>> = render_all_with(&bank).into_iter().collect();
         let mut last: HashMap<Sound, Instant> = HashMap::new();
         while let Ok(sound) = rx.recv() {
             let Some(p) = PLAYER.get() else { continue };
@@ -451,6 +501,45 @@ mod tests {
         assert!(get(Sound::Move) < 0.25);
         assert!(get(Sound::Key) < 0.2);
         assert!(get(Sound::Intro) > 3.0);
+    }
+
+    #[test]
+    fn sounds_built_from_user_samples_stay_smooth_and_safe() {
+        // un faux « bell » (sinus qui s'éteint + un partiel) joue le rôle des échantillons de l'utilisateur
+        let dir = std::env::temp_dir().join(format!("emunest-bank-render-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = |name: &str, freq: f32, secs: f32| {
+            let rate = 44_100u32;
+            let samples: Vec<i16> = (0..(rate as f32 * secs) as usize)
+                .map(|i| {
+                    let t = i as f32 / rate as f32;
+                    (((2.0 * PI * freq * t).sin() * 0.8 + (2.0 * PI * freq * 2.76 * t).sin() * 0.15) * (-t / 0.5).exp() * 30000.0) as i16
+                })
+                .collect();
+            let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+            let mut out = Vec::new();
+            out.extend_from_slice(b"RIFF");
+            out.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+            out.extend_from_slice(b"WAVEfmt ");
+            for v in [16u32.to_le_bytes().to_vec(), 1u16.to_le_bytes().to_vec(), 1u16.to_le_bytes().to_vec(), rate.to_le_bytes().to_vec(), (rate * 2).to_le_bytes().to_vec(), 2u16.to_le_bytes().to_vec(), 16u16.to_le_bytes().to_vec()] {
+                out.extend_from_slice(&v);
+            }
+            out.extend_from_slice(b"data");
+            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            out.extend_from_slice(&data);
+            std::fs::write(dir.join(name), out).unwrap();
+        };
+        wav("bell.wav", 523.25, 0.6);
+        wav("chime.wav", 261.63, 2.5);
+        let bank = load_bank(&dir);
+        assert!(bank.bell.is_some() && bank.chime.is_some());
+        for (sound, buf) in render_all_with(&bank) {
+            assert!(buf.iter().all(|s| s.is_finite()), "{sound:?}");
+            let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+            assert!((0.05..=0.45).contains(&peak), "{sound:?} pic {peak}");
+            assert!(buf[0].abs() < 0.01 && buf.last().unwrap().abs() < 0.01, "{sound:?} clic");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
