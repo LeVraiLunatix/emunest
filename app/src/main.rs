@@ -638,13 +638,16 @@ fn data_dir() -> PathBuf {
 fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").try_init().ok();
 
-    // usage : emunest [--windowed] [--pad=ps|xbox|nintendo] [dossier_roms]
+    // usage : emunest [--windowed] [--tv] [--pad=ps|xbox|nintendo] [dossier_roms]
     let mut windowed = false;
+    let mut tv = false;
     let mut forced_pad = None;
     let mut roms: Option<PathBuf> = None;
     for a in std::env::args().skip(1) {
         if a == "--windowed" {
             windowed = true
+        } else if a == "--tv" {
+            tv = true // plein écran, sans boutons de fenêtre : pour une télé ou une console portable
         } else if let Some(kind) = a.strip_prefix("--pad=") {
             // aperçu des symboles sans manette
             forced_pad = match kind {
@@ -661,7 +664,11 @@ fn main() -> Result<()> {
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::fs::remove_file(exe.with_extension("old")); // reste d'une mise à jour précédente
     }
-    let win = emunest_ui::create(!windowed)?;
+    let win = emunest_ui::create(!windowed || tv)?;
+    win.set_tv(tv);
+    if tv {
+        win.set_pad_active(true);
+    }
     if let Some(kind) = forced_pad {
         emunest_ui::set_pad_kind(&win, kind);
         win.set_pad_active(true);

@@ -365,6 +365,8 @@ export component MainWindow inherits Window {
     callback move-window();
     // vrai en mode fenêtre : poignées de redimensionnement et zone de déplacement actives
     in-out property <bool> windowed: false;
+    // mode télé : pas de boutons de fenêtre, tout se fait à la manette
+    in-out property <bool> tv: false;
     // filtres (console / favoris / récents), recherche et menu Options
     in-out property <[string]> filters;
     in-out property <int> filter-index: 0;
@@ -549,6 +551,7 @@ export component MainWindow inherits Window {
         Glass {
             x: (1920px * Scale.k) - pad - self.width;
             y: (40px * Scale.k);
+            visible: !root.tv;
             width: (168px * Scale.k);
             height: (80px * Scale.k);
             border-radius: (40px * Scale.k);
@@ -558,7 +561,7 @@ export component MainWindow inherits Window {
         }
         // position dans la liste (ex. 5 / 36)
         Glass {
-            x: (1920px * Scale.k) - pad - (168px * Scale.k) - (24px * Scale.k) - self.width;
+            x: (1920px * Scale.k) - pad - (root.tv ? 0px : (168px * Scale.k) + (24px * Scale.k)) - self.width;
             y: (40px * Scale.k);
             height: (80px * Scale.k);
             width: st.preferred-width + (76px * Scale.k);
