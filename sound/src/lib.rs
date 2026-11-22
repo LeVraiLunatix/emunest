@@ -390,8 +390,14 @@ pub fn write_wav(path: &std::path::Path, samples: &[f32]) -> std::io::Result<()>
 // Lecture
 // ---------------------------------------------------------------------------------------------
 
+/// Ce que le thread audio reçoit : jouer un son, ou couper celui de l'intro (intro passée par l'utilisateur).
+enum Msg {
+    Play(Sound),
+    StopIntro,
+}
+
 struct Player {
-    tx: Mutex<Sender<Sound>>,
+    tx: Mutex<Sender<Msg>>,
     enabled: AtomicBool,
     /// volume en millièmes (0..=1000)
     volume: AtomicU32,
@@ -401,7 +407,7 @@ static PLAYER: OnceLock<Player> = OnceLock::new();
 
 /// Démarre le thread audio. Renvoie vrai si un périphérique audio a été ouvert ; sinon tout reste silencieux (aucune erreur).
 pub fn init(enabled: bool, volume: f32, sounds_dir: Option<&std::path::Path>) -> bool {
-    let (tx, rx) = channel::<Sound>();
+    let (tx, rx) = channel::<Msg>();
     let player = Player { tx: Mutex::new(tx), enabled: AtomicBool::new(enabled), volume: AtomicU32::new((volume.clamp(0.0, 1.0) * 1000.0) as u32) };
     if PLAYER.set(player).is_err() {
         return true;
@@ -424,7 +430,17 @@ pub fn init(enabled: bool, volume: f32, sounds_dir: Option<&std::path::Path>) ->
         }
         let buffers: HashMap<Sound, Vec<f32>> = render_all_with(&bank).into_iter().collect();
         let mut last: HashMap<Sound, Instant> = HashMap::new();
-        while let Ok(sound) = rx.recv() {
+        let mut intro: Option<rodio::Player> = None; // seul son qu'on peut couper en route
+        while let Ok(msg) = rx.recv() {
+            let sound = match msg {
+                Msg::StopIntro => {
+                    if let Some(p) = intro.take() {
+                        p.stop();
+                    }
+                    continue;
+                }
+                Msg::Play(s) => s,
+            };
             let Some(p) = PLAYER.get() else { continue };
             if !p.enabled.load(Ordering::Relaxed) {
                 continue;
@@ -437,7 +453,14 @@ pub fn init(enabled: bool, volume: f32, sounds_dir: Option<&std::path::Path>) ->
             last.insert(sound, now);
             let vol = p.volume.load(Ordering::Relaxed) as f32 / 1000.0;
             let data: Vec<f32> = buffers[&sound].iter().map(|s| s * vol).collect();
-            sink.mixer().add(SamplesBuffer::new(NonZero::new(1).unwrap(), NonZero::new(SR).unwrap(), data));
+            let buf = SamplesBuffer::new(NonZero::new(1).unwrap(), NonZero::new(SR).unwrap(), data);
+            if sound == Sound::Intro {
+                let p = rodio::Player::connect_new(sink.mixer());
+                p.append(buf);
+                intro = Some(p);
+            } else {
+                sink.mixer().add(buf);
+            }
         }
     });
     ready_rx.recv_timeout(Duration::from_secs(2)).unwrap_or(false)
@@ -447,8 +470,15 @@ pub fn init(enabled: bool, volume: f32, sounds_dir: Option<&std::path::Path>) ->
 pub fn play(sound: Sound) {
     if let Some(p) = PLAYER.get() {
         if p.enabled.load(Ordering::Relaxed) {
-            let _ = p.tx.lock().map(|tx| tx.send(sound));
+            let _ = p.tx.lock().map(|tx| tx.send(Msg::Play(sound)));
         }
+    }
+}
+
+/// Coupe le son de l'intro (quand l'utilisateur la passe). Sans effet s'il est déjà fini.
+pub fn stop_intro() {
+    if let Some(p) = PLAYER.get() {
+        let _ = p.tx.lock().map(|tx| tx.send(Msg::StopIntro));
     }
 }
 

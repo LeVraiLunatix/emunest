@@ -854,6 +854,7 @@ fn main() -> Result<()> {
         win.set_pad_active(true);
     }
     let weak = win.as_weak();
+    emunest_ui::watch_mouse(weak.clone());
 
     // Une seule action longue à la fois (partie, installation…) : Entrée pendant le jeu ne relance rien.
     let busy = Arc::new(AtomicBool::new(false));

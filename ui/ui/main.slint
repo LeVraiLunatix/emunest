@@ -807,6 +807,7 @@ export component MainWindow inherits Window {
                 // un clic sélectionne ; un second clic sur la jaquette sélectionnée lance le jeu
                 TouchArea {
                     clicked => {
+                        root.pad-active = false;
                         if (on) { root.launch(i); } else { root.selected = i; }
                     }
                 }
@@ -890,8 +891,7 @@ export component MainWindow inherits Window {
                 if !root.pad-active: KeyHint { key: "Tab"; label: "Console"; }
                 if !root.pad-active: KeyHint { key: "Entrée"; label: "Jouer"; }
                 if !root.pad-active: KeyHint { key: "O"; label: "Options"; }
-                if !root.pad-active: KeyHint { key: "Échap"; label: "Quitter"; }
-                if root.pad-active: PadHint { role: "dpad"; kind: root.pad-kind; label: "Naviguer"; }
+                            if root.pad-active: PadHint { role: "dpad"; kind: root.pad-kind; label: "Naviguer"; }
                 if root.pad-active: PadHint { role: "shoulders"; kind: root.pad-kind; label: "Console"; }
                 if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: "Jouer"; }
                 if root.pad-active: PadHint { role: "options"; kind: root.pad-kind; label: "Options"; }
@@ -1157,7 +1157,7 @@ export component MainWindow inherits Window {
         height: root.height;
         background: #04060c;
         opacity: 1 - clamp((self.t - 0.86) / 0.14, 0, 1);
-        TouchArea { clicked => { root.intro = false; } }
+        TouchArea { clicked => { root.intro = false; root.sfx("stop-intro"); } }
         // centre du logo : halo, anneaux et lueur s'organisent autour de lui (pas du centre de l'écran)
         property <length> cy: root.height / 2 - (70px * Scale.k);
         // halo d'ambiance
@@ -1239,7 +1239,10 @@ export component MainWindow inherits Window {
         init => { self.focus(); }
         key-pressed(e) => {
             // Windows envoie un évènement clavier parasite au démarrage : il ne doit pas couper l'intro (on attend 0,6 s)
-            if (root.intro) { if (root.intro-armed) { root.intro = false; } return accept; }
+            // Échap ne fait rien pendant l'intro (et jamais ne ferme l'app) ; toute autre touche la passe et coupe son son
+            if (root.intro) { if (root.intro-armed && e.text != Key.Escape) { root.intro = false; root.sfx("stop-intro"); } return accept; }
+            // le clavier reprend la main (les symboles de manette laissent place aux touches)
+            if (e.text != "") { root.pad-active = false; }
             if (root.dialog-mode != 0) {
                 if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Return) { root.dialog-accept(); }
                 else if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Escape) { root.dialog-cancel(); }
@@ -1264,7 +1267,7 @@ export component MainWindow inherits Window {
                 return accept;
             }
             if (root.key-action(e.text)) { return accept; }
-            if (e.text == Key.Escape) { root.quit(); return accept; }
+            if (e.text == Key.Escape) { return accept; }
             if (games.length == 0) { return reject; }
             if (e.text == Key.RightArrow || e.text == Key.DownArrow) { selected = (loops && sel == games.length - 1) ? 0 : min(sel + 1, games.length - 1); }
             else if (e.text == Key.LeftArrow || e.text == Key.UpArrow) { selected = (loops && sel == 0) ? games.length - 1 : max(sel - 1, 0); }

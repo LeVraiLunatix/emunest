@@ -201,7 +201,8 @@ fn pad_keyboard(win: &MainWindow, input: Pad) {
 pub fn pad_input(win: &MainWindow, input: Pad) {
     win.set_pad_active(true);
     if win.get_intro() {
-        win.set_intro(false); // n'importe quel bouton passe l'animation de démarrage
+        win.set_intro(false); // n'importe quel bouton passe l'animation de démarrage (et son son)
+        emunest_sound::stop_intro();
         return;
     }
     // haut / bas = gauche / droite partout, sauf sur le clavier à l'écran
@@ -806,6 +807,36 @@ fn native_drag(win: &slint::Window, hit: usize) {
 #[cfg(not(windows))]
 fn native_drag(_: &slint::Window, _: usize) {}
 
+/// Surveille la souris : dès qu'elle bouge, la souris et le clavier reprennent la main sur la manette
+/// (les symboles de boutons laissent place aux touches). La manette la reprend à son prochain bouton.
+#[cfg(windows)]
+pub fn watch_mouse(win: slint::Weak<MainWindow>) {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    std::thread::spawn(move || {
+        let pos = || {
+            let mut p = POINT { x: 0, y: 0 };
+            // SAFETY: `p` est une structure valide, écrite par le système
+            unsafe { GetCursorPos(&mut p) };
+            (p.x, p.y)
+        };
+        let mut last = pos();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let now = pos();
+            if (now.0 - last.0).abs() + (now.1 - last.1).abs() > 3 {
+                last = now;
+                if win.upgrade_in_event_loop(|w| { if w.get_pad_active() { w.set_pad_active(false); } }).is_err() {
+                    return; // fenêtre fermée
+                }
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn watch_mouse(_: slint::Weak<MainWindow>) {}
+
 pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
     let win = MainWindow::new()?;
     win.window().set_fullscreen(fullscreen);
@@ -934,6 +965,7 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
             "key" => Sound::Key,
             "open" => Sound::Open,
             "close" => Sound::Close,
+            "stop-intro" => return emunest_sound::stop_intro(),
             _ => return,
         })
     });
