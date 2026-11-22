@@ -7,7 +7,7 @@
 AppId={{6E1B7F52-7C0A-4D6B-9B63-EMUNEST00001}
 AppName=EmuNest
 AppVersion={#AppVersion}
-AppPublisher=LeVraiLunatix
+AppPublisher=EmuNest
 DefaultDirName={autopf}\EmuNest
 DefaultGroupName=EmuNest
 DisableProgramGroupPage=yes
