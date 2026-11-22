@@ -6,3 +6,5 @@ executable = "PPSSPPWindows64.exe"
 launch_args = ["{rom}", "--fullscreen"]
 save_dirs = ["memstick\\PSP\\SAVEDATA", "memstick\\PSP\\PPSSPP_STATE"]
 alt_save_dirs = []
+screenshot_dirs = ["memstick\\PSP\\SCREENSHOT"]
+alt_screenshot_dirs = []

@@ -6,3 +6,5 @@ executable = "rpcs3.exe"
 launch_args = ["--no-gui", "{rom}"]
 save_dirs = ["dev_hdd0\\home\\00000001\\savedata"]
 alt_save_dirs = []
+screenshot_dirs = ["screenshots"]
+alt_screenshot_dirs = []

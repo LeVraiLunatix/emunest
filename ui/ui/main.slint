@@ -187,6 +187,7 @@ component PadHint inherits Rectangle {
     if role == "confirm": FaceButton { x: 0; y: (4px * Scale.k); kind: root.kind; pos: root.kind == 2 ? "east" : "south"; }
     if role == "back": FaceButton { x: 0; y: (4px * Scale.k); kind: root.kind; pos: root.kind == 2 ? "south" : "east"; }
     if role == "options": OptionsIcon { x: 0; y: (4px * Scale.k); }
+    if role == "north": FaceButton { x: 0; y: (4px * Scale.k); kind: root.kind; pos: "north"; }
     if role == "extra": FaceButton { x: 0; y: (4px * Scale.k); kind: root.kind; pos: "west"; }
     lbl := Text {
         x: root.icon-w + (18px * Scale.k);
@@ -375,6 +376,16 @@ export component MainWindow inherits Window {
     in-out property <[string]> menu-items;
     in-out property <int> menu-index: 0;
     callback key-action(string) -> bool;
+    // galerie de captures
+    in-out property <image> gallery-image;
+    in-out property <string> gallery-pos;
+    in-out property <bool> gallery-empty: true;
+    callback gallery-step(int);
+    callback gallery-delete();
+    // clavier à l'écran (saisie de texte à la manette)
+    in-out property <[string]> kb-labels;
+    in-out property <int> kb-index: 0;
+    callback kb-press(int);
     callback menu-activate(int);
     init => { Scale.k = min(root.width / 1920px, root.height / 1080px); }
     changed width => { Scale.k = min(root.width / 1920px, root.height / 1080px); }
@@ -888,9 +899,67 @@ export component MainWindow inherits Window {
             height: (1080px * Scale.k);
             background: #05070ed0;
             TouchArea { }
-            Glass {
+            if root.dialog-mode == 6: Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                background: #000000e6;
+                TouchArea { clicked => { root.gallery-step(1); } }
+                if !root.gallery-empty: Image {
+                    source: root.gallery-image;
+                    image-fit: contain;
+                    x: (90px * Scale.k);
+                    y: (130px * Scale.k);
+                    width: parent.width - (180px * Scale.k);
+                    height: parent.height - (300px * Scale.k);
+                }
+                if root.gallery-empty: Text {
+                    text: "Aucune capture pour ce jeu.\nFais une capture d'écran dans l'émulateur pendant une partie : elle est ajoutée toute seule.";
+                    color: #c3c9d8;
+                    font-size: (34px * Scale.k);
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    x: (200px * Scale.k);
+                    width: parent.width - (400px * Scale.k);
+                }
+                Text {
+                    x: (90px * Scale.k);
+                    y: (40px * Scale.k);
+                    width: parent.width - (500px * Scale.k);
+                    text: root.dialog-title;
+                    color: #ffffff;
+                    font-size: (44px * Scale.k);
+                    font-weight: 800;
+                    overflow: elide;
+                }
+                Text {
+                    x: parent.width - (410px * Scale.k);
+                    y: (46px * Scale.k);
+                    width: (320px * Scale.k);
+                    horizontal-alignment: right;
+                    text: root.gallery-pos;
+                    color: #dfe4f1;
+                    font-size: (36px * Scale.k);
+                    font-weight: 700;
+                }
+                Rectangle {
+                    x: (90px * Scale.k);
+                    y: parent.height - (140px * Scale.k);
+                    height: (56px * Scale.k);
+                    width: parent.width - (180px * Scale.k);
+                    if !root.pad-active: KeyHint { x: 0; key: "← →"; label: "Parcourir"; }
+                    if !root.pad-active: KeyHint { x: (420px * Scale.k); key: "Suppr"; label: "Supprimer"; }
+                    if !root.pad-active: KeyHint { x: (840px * Scale.k); key: "Échap"; label: "Fermer"; }
+                    if root.pad-active: PadHint { x: 0; role: "dpad"; kind: root.pad-kind; label: "Parcourir"; }
+                    if root.pad-active: PadHint { x: (420px * Scale.k); role: "extra"; kind: root.pad-kind; label: "Supprimer"; }
+                    if root.pad-active: PadHint { x: (840px * Scale.k); role: "back"; kind: root.pad-kind; label: "Fermer"; }
+                }
+            }
+            if root.dialog-mode != 6: Glass {
                 width: (1120px * Scale.k);
-                height: root.dialog-mode == 4 ? (190px * Scale.k) + root.menu-items.length * (72px * Scale.k) : (440px * Scale.k);
+                height: root.dialog-mode == 4 ? (190px * Scale.k) + root.menu-items.length * (72px * Scale.k) : (root.dialog-mode == 5 && root.pad-active ? (700px * Scale.k) : (440px * Scale.k));
                 border-radius: (60px * Scale.k);
                 x: ((1920px * Scale.k) - self.width) / 2;
                 y: ((1080px * Scale.k) - self.height) / 2;
@@ -925,15 +994,43 @@ export component MainWindow inherits Window {
                     color: #c3c9d8;
                     font-size: (28px * Scale.k);
                 }
+                if root.dialog-mode == 5 && root.pad-active: Rectangle {
+                    x: (72px * Scale.k);
+                    y: (236px * Scale.k);
+                    width: parent.width - (144px * Scale.k);
+                    height: (350px * Scale.k);
+                    for label[i] in root.kb-labels: Rectangle {
+                        property <int> krow: i < 40 ? floor(i / 10) : 4;
+                        property <int> kcol: i < 40 ? mod(i, 10) : i - 40;
+                        x: i < 40 ? kcol * (parent.width / 10) : kcol * (parent.width / 4);
+                        y: krow * (70px * Scale.k);
+                        width: (i < 40 ? parent.width / 10 : parent.width / 4) - (8px * Scale.k);
+                        height: (62px * Scale.k);
+                        border-radius: (16px * Scale.k);
+                        background: i == root.kb-index ? accent.with-alpha(0.85) : #ffffff1a;
+                        border-width: i == root.kb-index ? (2px * Scale.k) : (1px * Scale.k);
+                        border-color: i == root.kb-index ? #ffffffcc : #ffffff30;
+                        animate background { duration: 100ms; }
+                        Text {
+                            text: label;
+                            color: #ffffff;
+                            font-size: i < 40 ? (30px * Scale.k) : (26px * Scale.k);
+                            font-weight: i == root.kb-index ? 800 : 600;
+                        }
+                        TouchArea { clicked => { root.kb-press(i); } }
+                    }
+                }
                 if root.dialog-mode == 1 || root.dialog-mode == 3 || root.dialog-mode == 5: HorizontalLayout {
                     x: (72px * Scale.k);
-                    y: (324px * Scale.k);
+                    y: root.dialog-mode == 5 && root.pad-active ? (606px * Scale.k) : (324px * Scale.k);
                     width: parent.width - (144px * Scale.k);
                     height: (56px * Scale.k);
                     spacing: (56px * Scale.k);
                     alignment: start;
                     if !root.pad-active: KeyHint { key: "Entrée"; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Valider" : "Installer"; }
-                    if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Valider" : "Installer"; }
+                    if root.pad-active: PadHint { role: "confirm"; kind: root.pad-kind; label: root.dialog-mode == 3 ? "Vérifier" : root.dialog-mode == 5 ? "Taper" : "Installer"; }
+                    if root.dialog-mode == 5 && root.pad-active: PadHint { role: "extra"; kind: root.pad-kind; label: "Effacer"; }
+                    if root.dialog-mode == 5 && root.pad-active: PadHint { role: "north"; kind: root.pad-kind; label: "Espace"; }
                     if root.dialog-mode == 3 && !root.pad-active: KeyHint { key: "O"; label: "Ouvrir le dossier"; }
                     if root.dialog-mode == 3 && root.pad-active: PadHint { role: "extra"; kind: root.pad-kind; label: "Ouvrir le dossier"; }
                     if !root.pad-active: KeyHint { key: "Échap"; label: "Annuler"; }
@@ -1002,6 +1099,12 @@ export component MainWindow inherits Window {
                 if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Return) { root.dialog-accept(); }
                 else if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Escape) { root.dialog-cancel(); }
                 else if (root.dialog-mode == 3 && (e.text == "o" || e.text == "O")) { root.dialog-extra(); }
+                else if (root.dialog-mode == 6) {
+                    if (e.text == Key.LeftArrow || e.text == Key.UpArrow) { root.gallery-step(-1); }
+                    else if (e.text == Key.RightArrow || e.text == Key.DownArrow || e.text == Key.Return) { root.gallery-step(1); }
+                    else if (e.text == Key.Delete) { root.gallery-delete(); }
+                    else if (e.text == Key.Escape) { root.dialog-cancel(); }
+                }
                 else if (root.dialog-mode == 5) {
                     if (e.text == Key.Return) { root.dialog-accept(); }
                     else if (e.text == Key.Escape) { root.dialog-cancel(); }

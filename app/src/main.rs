@@ -190,6 +190,7 @@ fn play(data: &Path, ui: &Ui, game: Game) {
     if !ensure_files(ui, &exe, &profile) {
         return;
     }
+    let shots = emunest_core::gallery::ShotWatch::new(&exe, &profile); // pour retrouver les captures de la partie
     let mut child = match launch::launch(&exe, &profile, &game.path, &game.extra_args) {
         Ok(c) => c,
         Err(e) => return toast(ui, format!("{e:#}")),
@@ -201,6 +202,10 @@ fn play(data: &Path, ui: &Ui, game: Game) {
         let _ = lib.record_play(&game.path, played.as_secs() as i64);
     }
     reload(data, ui);
+    let added = shots.new_shots().iter().filter(|s| matches!(emunest_metadata::import_shot(data, &game, s), Ok(Some(_)))).count();
+    if added > 0 {
+        toast(ui, format!("{added} capture(s) ajoutée(s) à la galerie de {}", game.title));
+    }
     let cfg = config::load(data);
     if cfg.auto_backup {
         match emunest_core::backup::backup_emulator(&exe, &profile, &cfg.backup_dir(data)) {
@@ -228,6 +233,8 @@ enum Sub {
     ResetGame,
     ChooseCover,
     RefetchCover,
+    AddShot,
+    OpenShots,
     RomFolders,
     AddRomFolder,
     RemoveRomFolder(PathBuf),
@@ -505,6 +512,19 @@ fn handle_sub(data: &Path, ui: &Ui, sub: Sub, game: Option<Game>, cli: &Option<P
             let d = data.to_path_buf();
             let _ = ui.upgrade_in_event_loop(move |w| emunest_ui::refresh_cover(&w, &g, &d));
         }
+        Sub::AddShot => {
+            let Some(g) = need_game() else { return };
+            let files = rfd::FileDialog::new().set_title("Ajouter des captures").add_filter("Images", &["png", "jpg", "jpeg", "bmp"]).pick_files();
+            let Some(files) = files else { return };
+            let added = files.iter().filter(|f| matches!(emunest_metadata::import_shot(data, &g, f), Ok(Some(_)))).count();
+            toast(ui, format!("{added} capture(s) ajoutée(s) à la galerie"));
+        }
+        Sub::OpenShots => {
+            let Some(g) = need_game() else { return };
+            let dir = emunest_metadata::shots_dir(data, &g);
+            let _ = std::fs::create_dir_all(&dir);
+            open_with_default(&dir);
+        }
         Sub::RomFolders => show_rom_folders(data, ui),
         Sub::AddRomFolder => {
             let Some(dir) = rfd::FileDialog::new().set_title("Dossier de ROMs").pick_folder() else { return };
@@ -584,8 +604,13 @@ fn menu_action(data: &Path, ui: &Ui, action: MenuAction, game: Option<Game>, cli
         (MenuAction::GameSettings, Some(g)) => show_game_settings(ui, &g),
         (MenuAction::Cover, Some(_)) => show_sub(
             ui,
-            "Jaquette".into(),
-            vec![(Sub::ChooseCover, "Choisir une image…".into()), (Sub::RefetchCover, "Rechercher à nouveau automatiquement".into())],
+            "Jaquette et captures".into(),
+            vec![
+                (Sub::ChooseCover, "Choisir une jaquette…".into()),
+                (Sub::RefetchCover, "Rechercher la jaquette automatiquement".into()),
+                (Sub::AddShot, "Ajouter une capture à la galerie…".into()),
+                (Sub::OpenShots, "Ouvrir le dossier des captures".into()),
+            ],
         ),
         (MenuAction::Notes, Some(g)) => {
             if let Some(note) = prompt(ui, &format!("Notes · {}", g.title), &g.note) {

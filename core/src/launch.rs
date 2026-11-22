@@ -150,6 +150,8 @@ mod tests {
             requires: vec![],
             save_dirs: vec![],
             alt_save_dirs: vec![],
+            screenshot_dirs: vec![],
+            alt_screenshot_dirs: vec![],
         };
         let exe = PathBuf::from(std::env::var("COMSPEC").unwrap());
         let status = launch(&exe, &profile, &rom, "").unwrap().wait().unwrap();

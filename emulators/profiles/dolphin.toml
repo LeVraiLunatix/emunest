@@ -6,3 +6,5 @@ executable = "Dolphin.exe"
 launch_args = ["-b", "-e", "{rom}"]
 save_dirs = ["User\\GC", "User\\Wii\\title", "User\\StateSaves"]
 alt_save_dirs = ['%APPDATA%\Dolphin Emulator\GC', '%APPDATA%\Dolphin Emulator\Wii\title', '%APPDATA%\Dolphin Emulator\StateSaves']
+screenshot_dirs = ["User\\ScreenShots"]
+alt_screenshot_dirs = ['%USERPROFILE%\Documents\Dolphin Emulator\ScreenShots', '%APPDATA%\Dolphin Emulator\ScreenShots']

@@ -52,6 +52,11 @@ pub struct Profile {
     /// dossiers de sauvegardes hors mode portable (variables %NOM% acceptées)
     #[serde(default)]
     pub alt_save_dirs: Vec<String>,
+    /// dossiers où l'émulateur range ses captures d'écran (mêmes règles que `save_dirs`)
+    #[serde(default)]
+    pub screenshot_dirs: Vec<String>,
+    #[serde(default)]
+    pub alt_screenshot_dirs: Vec<String>,
 }
 
 const BUILTIN: &[&str] = &[

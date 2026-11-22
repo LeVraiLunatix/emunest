@@ -6,3 +6,5 @@ executable = "Cemu.exe"
 launch_args = ["-f", "-g", "{rom}"]
 save_dirs = ["mlc01\\usr\\save"]
 alt_save_dirs = []
+screenshot_dirs = ["screenshots"]
+alt_screenshot_dirs = []

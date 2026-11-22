@@ -9,6 +9,9 @@ portable = true
 save_dirs = ["memcards", "sstates"]
 alt_save_dirs = ['%USERPROFILE%\Documents\PCSX2\memcards', '%USERPROFILE%\Documents\PCSX2\sstates']
 
+screenshot_dirs = ["snaps"]
+alt_screenshot_dirs = ['%USERPROFILE%\Documents\PCSX2\snaps']
+
 [[requires]]
 label = "BIOS PlayStation 2"
 dir = "bios"

@@ -6,3 +6,5 @@ executable = "azahar.exe"
 launch_args = ["-f", "{rom}"]
 save_dirs = []
 alt_save_dirs = ['%APPDATA%\Azahar\sdmc']
+screenshot_dirs = []
+alt_screenshot_dirs = ['%APPDATA%\Azahar\screenshots']

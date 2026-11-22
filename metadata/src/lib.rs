@@ -277,6 +277,42 @@ fn wikipedia_cover(http: &reqwest::blocking::Client, title: &str) -> Result<Opti
     Ok(best.map(|(src, _, _)| src))
 }
 
+/// Dossier des captures d'un jeu (galerie).
+pub fn shots_dir(dir: &Path, g: &Game) -> PathBuf {
+    dir.join("shots").join(key(g))
+}
+
+/// Captures du jeu, les plus récentes d'abord.
+pub fn list_shots(dir: &Path, g: &Game) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(shots_dir(dir, g))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg", "bmp"].iter().any(|x| x.eq_ignore_ascii_case(e))))
+        .collect();
+    v.sort_by(|a, b| b.cmp(a)); // les noms commencent par la date : ordre alphabétique inversé = récent d'abord
+    v
+}
+
+/// Copie une capture dans la galerie du jeu (une capture déjà importée, de même nom et taille, est ignorée).
+/// Renvoie le chemin dans la galerie, ou `None` si elle y était déjà.
+pub fn import_shot(dir: &Path, g: &Game, src: &Path) -> Result<Option<PathBuf>> {
+    let dest_dir = shots_dir(dir, g);
+    std::fs::create_dir_all(&dest_dir)?;
+    let name = src.file_name().and_then(|n| n.to_str()).context("nom de fichier invalide")?;
+    let size = std::fs::metadata(src)?.len();
+    let already = std::fs::read_dir(&dest_dir)?
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().ends_with(&format!("-{name}")) && e.metadata().is_ok_and(|m| m.len() == size));
+    if already {
+        return Ok(None);
+    }
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let dest = dest_dir.join(format!("{secs:012}-{name}"));
+    std::fs::copy(src, &dest)?;
+    Ok(Some(dest))
+}
+
 /// Jaquette choisie par l'utilisateur : remplace celle en cache (et sera conservée : plus de recherche automatique).
 pub fn set_custom_cover(dir: &Path, g: &Game, src: &Path) -> Result<()> {
     let img = image::open(src).with_context(|| format!("image illisible : {}", src.display()))?;
@@ -375,5 +411,34 @@ mod tests {
     #[test]
     fn encodes_like_url() {
         assert_eq!(encode("A (B).png"), "A%20%28B%29.png");
+    }
+
+    #[test]
+    fn gallery_imports_once_and_lists_newest_first() {
+        let root = std::env::temp_dir().join(format!("emunest-gallery-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let game = Game {
+            path: "D:\\x\\a.iso".into(),
+            title: "A".into(),
+            platform: "ps2".into(),
+            emulator: "PCSX2".into(),
+            emu_override: None,
+            extra_args: String::new(),
+            note: String::new(),
+            collections: vec![],
+            favorite: false,
+            last_played: 0,
+            play_secs: 0,
+        };
+        let shot = root.join("shot1.png");
+        std::fs::write(&shot, b"abc").unwrap();
+        assert!(import_shot(&root, &game, &shot).unwrap().is_some());
+        assert!(import_shot(&root, &game, &shot).unwrap().is_none(), "déjà importée");
+        std::fs::write(shots_dir(&root, &game).join("999999999999-later.png"), b"z").unwrap();
+        let names: Vec<String> = list_shots(&root, &game).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names[0], "999999999999-later.png");
+        assert_eq!(names.len(), 2);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

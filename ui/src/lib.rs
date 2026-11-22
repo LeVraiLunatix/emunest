@@ -49,6 +49,7 @@ pub enum MenuAction {
     UpdateEmulator,
     OpenFolder,
     Cover,
+    Gallery,
     AppSettings,
     Item(u32),
 }
@@ -76,6 +77,12 @@ struct View {
     on_favorite: Option<Rc<dyn Fn(Game)>>,
     on_menu: Option<Rc<dyn Fn(MenuAction, Option<Game>)>>,
     on_settings: Option<Rc<dyn Fn()>>,
+    /// clavier à l'écran : touche sélectionnée et Maj
+    kb_index: usize,
+    kb_shift: bool,
+    /// galerie : captures du jeu ouvert et position
+    gallery: Vec<PathBuf>,
+    gallery_idx: usize,
 }
 
 thread_local! {
@@ -165,11 +172,45 @@ pub enum Pad {
     Favorite,
     /// Select : menu Options
     Options,
+    /// haut / bas de la croix ou du stick (comme gauche / droite, sauf sur le clavier à l'écran)
+    Up,
+    Down,
+    /// Start : valide (touche OK du clavier à l'écran)
+    Start,
+}
+
+/// Manette dans la saisie de texte : croix = déplacer, A = taper, X = effacer, Y = espace, RB = Maj, Start/OK = valider.
+fn pad_keyboard(win: &MainWindow, input: Pad) {
+    let idx = VIEW.with_borrow(|v| v.kb_index);
+    match input {
+        Pad::Step(d) => kb_move(win, d, 0),
+        Pad::Up => kb_move(win, 0, -1),
+        Pad::Down => kb_move(win, 0, 1),
+        Pad::Accept => kb_press(win, idx),
+        Pad::Extra => kb_press(win, 42),
+        Pad::Favorite => kb_press(win, 41),
+        Pad::Filter(_) => kb_press(win, 40),
+        Pad::Back => win.invoke_dialog_cancel(),
+        _ => {}
+    }
 }
 
 /// Applique une action de manette. Thread UI.
 pub fn pad_input(win: &MainWindow, input: Pad) {
     win.set_pad_active(true);
+    // haut / bas = gauche / droite partout, sauf sur le clavier à l'écran
+    let input = match input {
+        Pad::Up if win.get_dialog_mode() != 5 => Pad::Step(-1),
+        Pad::Down if win.get_dialog_mode() != 5 => Pad::Step(1),
+        Pad::Start if win.get_dialog_mode() != 5 => Pad::Accept,
+        other => other,
+    };
+    if win.get_dialog_mode() == 5 {
+        if input == Pad::Start {
+            return win.invoke_dialog_accept();
+        }
+        return pad_keyboard(win, input);
+    }
     let n = win.get_games().row_count() as i32;
     match win.get_dialog_mode() {
         0 => {}
@@ -179,6 +220,17 @@ pub fn pad_input(win: &MainWindow, input: Pad) {
             match input {
                 Pad::Step(d) if d.abs() == 1 => win.set_menu_index((win.get_menu_index() + d).clamp(0, (len - 1).max(0))),
                 Pad::Accept => win.invoke_menu_activate(win.get_menu_index()),
+                Pad::Back => win.invoke_dialog_cancel(),
+                _ => {}
+            }
+            return;
+        }
+        6 => {
+            // galerie : croix = parcourir, X = supprimer, B = fermer
+            match input {
+                Pad::Step(d) => gallery_step(win, d),
+                Pad::Accept => gallery_step(win, 1),
+                Pad::Extra => gallery_delete(win),
                 Pad::Back => win.invoke_dialog_cancel(),
                 _ => {}
             }
@@ -202,6 +254,87 @@ pub fn pad_input(win: &MainWindow, input: Pad) {
         Pad::Favorite => toggle_favorite(win),
         Pad::Options => open_menu(win),
         _ => {}
+    }
+}
+
+// ---------- clavier à l'écran (saisie de texte à la manette) ----------
+
+/// 4 rangées de 10 touches (AZERTY) puis 4 grandes touches : Maj, Espace, Suppr, OK.
+const KB_ROWS: [&str; 4] = ["1234567890", "azertyuiop", "qsdfghjklm", "wxcvbn,.'-"];
+const KB_SPECIAL: [&str; 4] = ["Maj", "Espace", "Suppr", "OK"];
+const KB_LETTERS: usize = 40;
+
+fn kb_labels(shift: bool) -> Vec<SharedString> {
+    let keys = KB_ROWS.iter().flat_map(|r| r.chars()).map(|c| if shift { c.to_uppercase().to_string() } else { c.to_string() });
+    keys.chain(KB_SPECIAL.iter().map(|s| s.to_string())).map(SharedString::from).collect()
+}
+
+fn kb_show(win: &MainWindow) {
+    let (idx, shift) = VIEW.with_borrow(|v| (v.kb_index, v.kb_shift));
+    win.set_kb_labels(ModelRc::new(VecModel::from(kb_labels(shift))));
+    win.set_kb_index(idx as i32);
+}
+
+/// Déplace le curseur du clavier : même rangée (gauche/droite) ou rangée voisine (haut/bas).
+fn kb_move(win: &MainWindow, dx: i32, dy: i32) {
+    VIEW.with_borrow_mut(|v| {
+        let i = v.kb_index;
+        let (row, col) = if i < KB_LETTERS { (i / 10, i % 10) } else { (4, i - KB_LETTERS) };
+        let width = if row == 4 { 4 } else { 10 };
+        // la rangée du bas a 4 grandes touches : on fait correspondre les colonnes par position horizontale
+        let x10 = if row == 4 { col * 10 / 4 + 1 } else { col };
+        let new_row = (row as i32 + dy).rem_euclid(5) as usize;
+        let new_col = if dy != 0 {
+            if new_row == 4 { (x10 * 4 / 10).min(3) } else { x10.min(9) }
+        } else {
+            (col as i32 + dx).rem_euclid(width as i32) as usize
+        };
+        v.kb_index = if new_row == 4 { KB_LETTERS + new_col } else { new_row * 10 + new_col };
+    });
+    kb_show(win);
+}
+
+/// Modifie le texte en cours de saisie ; renvoie le nouveau texte.
+fn prompt_edit(win: &MainWindow, edit: impl FnOnce(&mut String)) {
+    let text = PROMPT.with_borrow_mut(|p| {
+        let (t, _) = p.as_mut()?;
+        edit(t);
+        Some(t.clone())
+    });
+    if let Some(t) = text {
+        win.set_dialog_text(t.into());
+    }
+}
+
+/// Appuie sur la touche `i` du clavier à l'écran (manette ou clic).
+fn kb_press(win: &MainWindow, i: usize) {
+    match i {
+        i if i < KB_LETTERS => {
+            let c = KB_ROWS.iter().flat_map(|r| r.chars()).nth(i).unwrap_or(' ');
+            let shift = VIEW.with_borrow(|v| v.kb_shift);
+            prompt_edit(win, |t| {
+                if t.chars().count() < 80 {
+                    t.extend(if shift { c.to_uppercase().collect::<Vec<_>>() } else { vec![c] });
+                }
+            });
+            if shift {
+                VIEW.with_borrow_mut(|v| v.kb_shift = false); // Maj ne vaut que pour une lettre
+                kb_show(win);
+            }
+        }
+        40 => {
+            VIEW.with_borrow_mut(|v| v.kb_shift = !v.kb_shift);
+            kb_show(win);
+        }
+        41 => prompt_edit(win, |t| {
+            if t.chars().count() < 80 {
+                t.push(' ');
+            }
+        }),
+        42 => prompt_edit(win, |t| {
+            t.pop();
+        }),
+        _ => win.invoke_dialog_accept(), // OK
     }
 }
 
@@ -444,14 +577,72 @@ pub fn show_menu(win: &MainWindow, title: &str, entries: Vec<(MenuAction, String
 /// Saisie de texte : la réponse (`None` si annulée) part sur `tx`. Thread UI.
 pub fn ask_text(win: &MainWindow, title: &str, initial: &str, tx: Sender<Option<String>>) {
     PROMPT.with_borrow_mut(|p| *p = Some((initial.to_string(), tx)));
+    VIEW.with_borrow_mut(|v| {
+        v.kb_index = 10; // la touche « a »
+        v.kb_shift = initial.is_empty(); // majuscule pour la première lettre
+    });
+    kb_show(win);
     win.set_dialog_title(title.into());
     win.set_dialog_text(initial.into());
     win.set_dialog_mode(5);
 }
 
+// ---------- galerie de captures ----------
+
+/// Affiche la capture courante dans la visionneuse.
+fn gallery_show(win: &MainWindow) {
+    let (path, idx, total) = VIEW.with_borrow(|v| (v.gallery.get(v.gallery_idx).cloned(), v.gallery_idx, v.gallery.len()));
+    match path.and_then(|p| Image::load_from_path(&p).ok()) {
+        Some(img) => {
+            win.set_gallery_image(img);
+            win.set_gallery_empty(false);
+            win.set_gallery_pos(format!("{} / {}", idx + 1, total).into());
+        }
+        None => {
+            win.set_gallery_image(Image::default());
+            win.set_gallery_empty(true);
+            win.set_gallery_pos("".into());
+        }
+    }
+}
+
+fn gallery_step(win: &MainWindow, d: i32) {
+    VIEW.with_borrow_mut(|v| {
+        let n = v.gallery.len() as i32;
+        if n > 0 {
+            v.gallery_idx = (v.gallery_idx as i32 + d).rem_euclid(n) as usize;
+        }
+    });
+    gallery_show(win);
+}
+
+/// Supprime la capture affichée (la copie de la galerie, pas le fichier d'origine de l'émulateur).
+fn gallery_delete(win: &MainWindow) {
+    VIEW.with_borrow_mut(|v| {
+        if v.gallery_idx < v.gallery.len() {
+            let _ = std::fs::remove_file(v.gallery.remove(v.gallery_idx));
+            v.gallery_idx = v.gallery_idx.min(v.gallery.len().saturating_sub(1));
+        }
+    });
+    gallery_show(win);
+}
+
+/// Ouvre la galerie du jeu sélectionné.
+fn open_gallery(win: &MainWindow) {
+    let Some(g) = current_game(win) else { return };
+    VIEW.with_borrow_mut(|v| {
+        v.gallery = emunest_metadata::list_shots(&v.cache, &g);
+        v.gallery_idx = 0;
+    });
+    win.set_dialog_title(g.title.as_str().into());
+    gallery_show(win);
+    win.set_dialog_mode(6);
+}
+
 /// Ouvre le menu Options du jeu sélectionné.
 fn open_menu(win: &MainWindow) {
     let Some(g) = current_game(win) else { return };
+    let cache = VIEW.with_borrow(|v| v.cache.clone());
     show_menu(
         win,
         &g.title,
@@ -464,7 +655,8 @@ fn open_menu(win: &MainWindow) {
             (MenuAction::OpenEmulator, format!("Ouvrir {} (réglages)", g.emulator)),
             (MenuAction::UpdateEmulator, format!("Mettre à jour {}", g.emulator)),
             (MenuAction::OpenFolder, "Ouvrir le dossier du jeu".to_string()),
-            (MenuAction::Cover, "Jaquette…".to_string()),
+            (MenuAction::Gallery, format!("Captures ({})…", emunest_metadata::list_shots(&cache, &g).len())),
+            (MenuAction::Cover, "Jaquette et captures…".to_string()),
             (MenuAction::AppSettings, "Réglages d'EmuNest…".to_string()),
         ],
     );
@@ -482,19 +674,16 @@ fn key_action(win: &MainWindow, text: &str) -> bool {
     let typed = !c.is_control() && !('\u{e000}'..='\u{f8ff}').contains(&c); // exclut les touches de navigation de Slint
     // saisie de texte en cours (fenêtre modale) : tout ce qui se tape va dans le champ
     if PROMPT.with_borrow(|p| p.is_some()) {
-        let text = PROMPT.with_borrow_mut(|p| {
-            let (t, _) = p.as_mut()?;
-            match c {
-                '\u{8}' => {
-                    t.pop();
+        match c {
+            '\u{8}' => prompt_edit(win, |t| {
+                t.pop();
+            }),
+            c if typed => prompt_edit(win, |t| {
+                if t.chars().count() < 80 {
+                    t.push(c);
                 }
-                c if typed && t.chars().count() < 80 => t.push(c),
-                _ => return None,
-            }
-            Some(t.clone())
-        });
-        if let Some(t) = text {
-            win.set_dialog_text(t.into());
+            }),
+            _ => {}
         }
         return true;
     }
@@ -644,6 +833,7 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
         match (action, &game) {
             (MenuAction::Play, Some(_)) => w.invoke_launch(w.get_current()),
             (MenuAction::ToggleFavorite, Some(_)) => toggle_favorite(&w),
+            (MenuAction::Gallery, Some(_)) => open_gallery(&w),
             _ => {
                 if let Some(cb) = VIEW.with_borrow(|v| v.on_menu.clone()) {
                     cb(action, game);
@@ -689,6 +879,26 @@ pub fn create(fullscreen: bool) -> Result<MainWindow, slint::PlatformError> {
         }
         if let Some(tx) = ANSWER.with_borrow_mut(|a| a.take()) {
             let _ = tx.send(Answer::No);
+        }
+    });
+    let weak = win.as_weak();
+    win.on_gallery_step(move |d| {
+        if let Some(w) = weak.upgrade() {
+            gallery_step(&w, d);
+        }
+    });
+    let weak = win.as_weak();
+    win.on_gallery_delete(move || {
+        if let Some(w) = weak.upgrade() {
+            gallery_delete(&w);
+        }
+    });
+    let weak = win.as_weak();
+    win.on_kb_press(move |i| {
+        if let Some(w) = weak.upgrade() {
+            VIEW.with_borrow_mut(|v| v.kb_index = i as usize);
+            kb_show(&w);
+            kb_press(&w, i as usize);
         }
     });
     win.on_quit(|| {

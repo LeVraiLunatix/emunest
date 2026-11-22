@@ -34,13 +34,15 @@ fn map_button(b: Button, kind: PadKind) -> Option<Pad> {
     // Nintendo : le bouton de droite (A) confirme, celui du bas (B) revient ; ailleurs c'est l'inverse
     let (accept, back) = if kind == PadKind::Nintendo { (Button::East, Button::South) } else { (Button::South, Button::East) };
     Some(match b {
-        Button::DPadLeft | Button::DPadUp => Pad::Step(-1),
-        Button::DPadRight | Button::DPadDown => Pad::Step(1),
+        Button::DPadLeft => Pad::Step(-1),
+        Button::DPadRight => Pad::Step(1),
+        Button::DPadUp => Pad::Up,
+        Button::DPadDown => Pad::Down,
         Button::LeftTrigger => Pad::Filter(-1),
         Button::RightTrigger => Pad::Filter(1),
         Button::North => Pad::Favorite,
         Button::Select => Pad::Options,
-        Button::Start => Pad::Accept,
+        Button::Start => Pad::Start,
         Button::West => Pad::Extra,
         x if x == accept => Pad::Accept,
         x if x == back => Pad::Back,
@@ -82,7 +84,7 @@ pub fn spawn(ui: Weak<MainWindow>, busy: Arc<AtomicBool>) {
                         if let Some(p) = map_button(b, kind) {
                             send(p);
                             // seuls les déplacements se répètent (pas A, pas B)
-                            if matches!(p, Pad::Step(_)) {
+                            if matches!(p, Pad::Step(_) | Pad::Up | Pad::Down) {
                                 held = Some((Source::Button(b), p, Instant::now() + FIRST_REPEAT));
                             }
                         }
@@ -92,8 +94,15 @@ pub fn spawn(ui: Weak<MainWindow>, busy: Arc<AtomicBool>) {
                             held = None;
                         }
                     }
-                    EventType::AxisChanged(Axis::LeftStickX, v, _) => {
-                        let dir = if v > STICK_ON { Some(Pad::Step(1)) } else if v < -STICK_ON { Some(Pad::Step(-1)) } else { None };
+                    EventType::AxisChanged(axis @ (Axis::LeftStickX | Axis::LeftStickY), v, _) => {
+                        // X : gauche / droite ; Y (positif = haut) : haut / bas
+                        let dir = match axis {
+                            Axis::LeftStickX if v > STICK_ON => Some(Pad::Step(1)),
+                            Axis::LeftStickX if v < -STICK_ON => Some(Pad::Step(-1)),
+                            Axis::LeftStickY if v > STICK_ON => Some(Pad::Up),
+                            Axis::LeftStickY if v < -STICK_ON => Some(Pad::Down),
+                            _ => None,
+                        };
                         match (dir, held) {
                             (Some(d), Some((Source::Stick, cur, _))) if d == cur => {}
                             (Some(d), _) => {
@@ -131,6 +140,8 @@ mod tests {
         assert_eq!(map_button(Button::East, Nintendo), Some(Pad::Accept));
         assert_eq!(map_button(Button::South, Nintendo), Some(Pad::Back));
         assert_eq!(map_button(Button::DPadRight, Generic), Some(Pad::Step(1)));
+        assert_eq!(map_button(Button::DPadUp, Generic), Some(Pad::Up));
+        assert_eq!(map_button(Button::Start, Generic), Some(Pad::Start));
         assert_eq!(map_button(Button::LeftTrigger, Xbox), Some(Pad::Filter(-1)));
         assert_eq!(map_button(Button::North, Xbox), Some(Pad::Favorite));
         assert_eq!(map_button(Button::Select, Xbox), Some(Pad::Options));

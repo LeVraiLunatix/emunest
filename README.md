@@ -21,6 +21,10 @@ Launcher d'émulateurs en **Rust pur** (pas de webview), rapide et léger, avec 
 - **Réglages** intégrés (touche `S`) : plusieurs dossiers de ROMs, état et mise à jour des émulateurs, config.
 - **Sauvegardes des saves** : zip datés (10 conservés par émulateur) vers un dossier de ton choix — pointe-le vers
   OneDrive/Dropbox pour une copie cloud —, à la demande ou automatiquement après chaque partie.
+- **Galerie de captures par jeu** : les captures d'écran faites dans l'émulateur pendant une partie sont retrouvées
+  et copiées automatiquement dans la galerie du jeu (Options › Captures) ; on peut aussi en ajouter à la main.
+- **Saisie de texte à la manette** : un clavier à l'écran apparaît pour nommer une collection ou écrire une note
+  (croix = bouger, A = taper, X = effacer, Y = espace, RB = Maj).
 - **Mode télé** : `emunest.exe --tv` (plein écran, sans boutons de fenêtre, tout à la manette).
 - **Mise à jour d'EmuNest** depuis Réglages (releases GitHub ; dépôt privé : `github_token` dans `config.toml`).
 

@@ -10,20 +10,26 @@ use walkdir::WalkDir;
 /// Nombre de sauvegardes conservées par émulateur.
 const KEEP: usize = 10;
 
-/// Dossiers de sauvegardes de l'émulateur qui existent réellement : en mode portable (`portable.txt`
-/// à côté de l'exécutable) ceux du dossier de l'exécutable, sinon les emplacements habituels de l'utilisateur.
-pub fn save_dirs(exe: &Path, profile: &Profile) -> Vec<PathBuf> {
+/// Emplacements possibles (existants ou non) d'une liste de dossiers de l'émulateur : en mode portable
+/// (`portable.txt` à côté de l'exécutable) ceux du dossier de l'exécutable, sinon les dossiers habituels de l'utilisateur.
+pub fn candidate_dirs(exe: &Path, rel: &[String], alt: &[String]) -> Vec<PathBuf> {
     let base = exe.parent().unwrap_or(Path::new("."));
-    let mut dirs: Vec<PathBuf> = if base.join("portable.txt").exists() || profile.alt_save_dirs.is_empty() {
-        profile.save_dirs.iter().map(|d| base.join(d)).collect()
+    let mut dirs: Vec<PathBuf> = if base.join("portable.txt").exists() || alt.is_empty() {
+        rel.iter().map(|d| base.join(d)).collect()
     } else {
-        profile.alt_save_dirs.iter().map(|d| expand(d)).collect()
+        alt.iter().map(|d| expand(d)).collect()
     };
     // un émulateur « portable » sans portable.txt garde parfois ses données à côté de l'exe : on regarde aussi
-    dirs.extend(profile.save_dirs.iter().map(|d| base.join(d)));
-    dirs.retain(|d| d.is_dir());
+    dirs.extend(rel.iter().map(|d| base.join(d)));
     dirs.sort();
     dirs.dedup();
+    dirs
+}
+
+/// Dossiers de sauvegardes de l'émulateur qui existent réellement.
+pub fn save_dirs(exe: &Path, profile: &Profile) -> Vec<PathBuf> {
+    let mut dirs = candidate_dirs(exe, &profile.save_dirs, &profile.alt_save_dirs);
+    dirs.retain(|d| d.is_dir());
     dirs
 }
 

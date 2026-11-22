@@ -9,6 +9,9 @@ portable = true
 save_dirs = ["memcards", "savestates"]
 alt_save_dirs = ['%USERPROFILE%\Documents\DuckStation\memcards', '%USERPROFILE%\Documents\DuckStation\savestates']
 
+screenshot_dirs = ["screenshots"]
+alt_screenshot_dirs = ['%USERPROFILE%\Documents\DuckStation\screenshots']
+
 [[requires]]
 label = "BIOS PlayStation"
 dir = "bios"
