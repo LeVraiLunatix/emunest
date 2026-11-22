@@ -1171,9 +1171,9 @@ export component MainWindow inherits Window {
         }
         // trois anneaux qui s'élargissent doucement depuis le logo
         for k in [0, 1, 2]: Rectangle {
-            property <float> p: clamp((iv.t - 0.18 - k * 0.11) / 0.55, 0, 1);
+            property <float> p: clamp((iv.t - 0.30 - k * 0.11) / 0.55, 0, 1);
             y: iv.cy - self.height / 2;
-            width: (220px * Scale.k) + self.p * (1100px * Scale.k);
+            width: (330px * Scale.k) + self.p * (1000px * Scale.k);
             height: self.width;
             border-radius: self.width / 2;
             border-width: (2px * Scale.k);

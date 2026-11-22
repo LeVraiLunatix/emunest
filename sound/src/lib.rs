@@ -238,7 +238,7 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
     };
     match sound {
         // déplacement : une goutte douce, à peine perceptible
-        Move => finish(tone(392.0, 0.16, 0.010, 0.050, ROUND, -0.06, 1.0), 0.17),
+        Move => finish(reverb(tone(392.0, 0.34, 0.010, 0.085, ROUND, -0.06, 1.0), 0.3, 0.2), 0.17),
         // changement de console : un souffle et deux notes qui se suivent
         Filter => finish(
             reverb(
@@ -315,7 +315,7 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
             0.22,
         ),
         // touche du clavier à l'écran : une pression feutrée
-        Key => finish(tone(329.63, 0.09, 0.006, 0.030, ROUND, -0.05, 1.0), 0.15),
+        Key => finish(reverb(tone(329.63, 0.22, 0.006, 0.050, ROUND, -0.05, 1.0), 0.25, 0.15), 0.15),
         Toast => finish(reverb(tone(440.0, 0.34, 0.014, 0.10, ROUND, -0.05, 1.0), 0.4, 0.25), 0.19),
         // erreur : deux notes graves qui retombent, sans agressivité
         Error => finish(
@@ -535,8 +535,8 @@ mod tests {
     #[test]
     fn short_ui_sounds_stay_short_and_the_intro_is_long_enough() {
         let get = |s: Sound| render(s).len() as f32 / SR as f32;
-        assert!(get(Sound::Move) < 0.25);
-        assert!(get(Sound::Key) < 0.2);
+        assert!(get(Sound::Move) < 0.6);
+        assert!(get(Sound::Key) < 0.4);
         assert!(get(Sound::Intro) > 3.0);
     }
 
