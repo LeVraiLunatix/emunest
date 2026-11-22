@@ -37,6 +37,9 @@ pub struct Config {
     /// volume des sons (0.0 à 1.0)
     #[serde(default = "default_volume")]
     pub volume: f32,
+    /// animation et son de démarrage
+    #[serde(default = "yes")]
+    pub intro: bool,
     /// installe tout seul les nouvelles versions d'EmuNest (jamais sur un exécutable compilé sur place)
     #[serde(default = "yes")]
     pub auto_update: bool,
@@ -54,7 +57,7 @@ fn default_volume() -> f32 {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { roms: vec![], emulators: BTreeMap::new(), backup_dir: None, auto_backup: false, sound: true, volume: 0.6, auto_update: true, github_token: None }
+        Self { roms: vec![], emulators: BTreeMap::new(), backup_dir: None, auto_backup: false, sound: true, volume: 0.6, intro: true, auto_update: true, github_token: None }
     }
 }
 

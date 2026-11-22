@@ -250,6 +250,7 @@ enum Sub {
     BackupNow,
     ToggleAutoBackup,
     ToggleSound,
+    ToggleIntro,
     CycleVolume,
     SetBackupDir,
     OpenBackupDir,
@@ -358,6 +359,7 @@ fn show_sound_menu(data: &Path, ui: &Ui) {
         vec![
             (Sub::ToggleSound, format!("Sons : {}", if cfg.sound { "oui" } else { "non" })),
             (Sub::CycleVolume, format!("Volume : {} %", (cfg.volume * 100.0).round() as u32)),
+            (Sub::ToggleIntro, format!("Animation de démarrage : {}", if cfg.intro { "oui" } else { "non" })),
         ],
     );
 }
@@ -676,6 +678,12 @@ fn handle_sub(data: &Path, ui: &Ui, sub: Sub, game: Option<Game>, cli: &Option<P
             emunest_sound::play(emunest_sound::Sound::Select);
             toast(ui, if cfg.sound { "Sons activés" } else { "Sons coupés" });
         }
+        Sub::ToggleIntro => {
+            let mut cfg = config::load(data);
+            cfg.intro = !cfg.intro;
+            log_err(config::save(data, &cfg));
+            toast(ui, if cfg.intro { "Animation de démarrage activée" } else { "Animation de démarrage désactivée" });
+        }
         Sub::CycleVolume => {
             // 20 → 40 → 60 → 80 → 100 → 20 %
             let mut cfg = config::load(data);
@@ -821,17 +829,20 @@ fn main() -> Result<()> {
     }
 
     let data = data_dir();
-    {
+    let intro = {
         let cfg = config::load(&data);
         if emunest_sound::init(cfg.sound, cfg.volume) {
-            emunest_sound::play(emunest_sound::Sound::Start);
+            // l'animation de démarrage a son propre son ; sans elle, un simple accord
+            emunest_sound::play(if cfg.intro { emunest_sound::Sound::Intro } else { emunest_sound::Sound::Start });
         }
-    }
+        cfg.intro
+    };
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::fs::remove_file(exe.with_extension("old")); // reste d'une mise à jour précédente
     }
     let win = emunest_ui::create(!windowed || tv)?;
     win.set_tv(tv);
+    win.set_intro(intro);
     if tv {
         win.set_pad_active(true);
     }

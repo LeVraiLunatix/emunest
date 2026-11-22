@@ -200,6 +200,10 @@ fn pad_keyboard(win: &MainWindow, input: Pad) {
 /// Applique une action de manette. Thread UI.
 pub fn pad_input(win: &MainWindow, input: Pad) {
     win.set_pad_active(true);
+    if win.get_intro() {
+        win.set_intro(false); // n'importe quel bouton passe l'animation de démarrage
+        return;
+    }
     // haut / bas = gauche / droite partout, sauf sur le clavier à l'écran
     let input = match input {
         Pad::Up if win.get_dialog_mode() != 5 => Pad::Step(-1),

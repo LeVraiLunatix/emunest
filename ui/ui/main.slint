@@ -368,6 +368,8 @@ export component MainWindow inherits Window {
     in-out property <bool> windowed: false;
     // mode télé : pas de boutons de fenêtre, tout se fait à la manette
     in-out property <bool> tv: false;
+    // animation de démarrage : se ferme seule, ou à la première touche / au premier clic
+    in-out property <bool> intro: false;
     // filtres (console / favoris / récents), recherche et menu Options
     in-out property <[string]> filters;
     in-out property <int> filter-index: 0;
@@ -1120,6 +1122,83 @@ export component MainWindow inherits Window {
     }
 
 
+    // ---------- Animation de démarrage ----------
+    if root.intro: iv := Rectangle {
+        property <float> t: 0;
+        init => { self.t = 1; }
+        animate t { duration: 4200ms; easing: linear; }
+        // courbes douces (smoothstep) calées sur le son d'intro
+        property <float> p-logo: clamp(self.t / 0.30, 0, 1);
+        property <float> e-logo: self.p-logo * self.p-logo * (3 - 2 * self.p-logo);
+        property <float> p-text: clamp((self.t - 0.30) / 0.35, 0, 1);
+        property <float> e-text: self.p-text * self.p-text * (3 - 2 * self.p-text);
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #04060c;
+        opacity: 1 - clamp((self.t - 0.86) / 0.14, 0, 1);
+        TouchArea { clicked => { root.intro = false; } }
+        // halo d'ambiance
+        Rectangle {
+            width: (1500px * Scale.k);
+            height: (1500px * Scale.k);
+            border-radius: (750px * Scale.k);
+            opacity: clamp(iv.t * 3, 0, 1) * 0.9;
+            background: @radial-gradient(circle, #5b7bff66 0%, #7a4dff2a 38%, transparent 70%);
+        }
+        // trois anneaux qui s'élargissent doucement depuis le logo
+        for k in [0, 1, 2]: Rectangle {
+            property <float> p: clamp((iv.t - 0.18 - k * 0.11) / 0.55, 0, 1);
+            width: (220px * Scale.k) + self.p * (1100px * Scale.k);
+            height: self.width;
+            border-radius: self.width / 2;
+            border-width: (2px * Scale.k);
+            border-color: #bcd0ff;
+            opacity: (1 - self.p) * 0.45 * clamp(iv.t * 8, 0, 1);
+        }
+        // lueur derrière le logo
+        Rectangle {
+            width: (520px * Scale.k);
+            height: (520px * Scale.k);
+            border-radius: (260px * Scale.k);
+            opacity: iv.e-logo * 0.85;
+            background: @radial-gradient(circle, #9bb4ff77 0%, #6f86ff22 45%, transparent 72%);
+        }
+        Image {
+            source: @image-url("logo.png");
+            width: ((210px * Scale.k) + iv.e-logo * (40px * Scale.k));
+            height: self.width;
+            y: root.height / 2 - self.height / 2 - (70px * Scale.k);
+            opacity: clamp(iv.t / 0.16, 0, 1);
+        }
+        Text {
+            y: root.height / 2 + (120px * Scale.k);
+            width: root.width;
+            horizontal-alignment: center;
+            text: "EMUNEST";
+            color: #f4f6fb;
+            font-size: (64px * Scale.k);
+            font-weight: 800;
+            letter-spacing: ((26px * Scale.k) - (18px * Scale.k) * iv.e-text);
+            opacity: iv.e-text;
+        }
+        Text {
+            y: root.height / 2 + (210px * Scale.k);
+            width: root.width;
+            horizontal-alignment: center;
+            text: "Tous tes jeux, un seul nid";
+            color: #aab2c5;
+            font-size: (28px * Scale.k);
+            opacity: clamp((iv.t - 0.52) / 0.2, 0, 1);
+        }
+    }
+    Timer {
+        interval: 4400ms;
+        running: root.intro;
+        triggered => { root.intro = false; }
+    }
+
     // poignées de redimensionnement sur les bords et coins (mode fenêtre)
     if root.windowed: Rectangle {
         Grip { x: 12px; y: 0; width: parent.width - 24px; height: 7px; mouse-cursor: ns-resize; code: 12; grab(c) => { root.resize-edge(c); } }
@@ -1135,6 +1214,7 @@ export component MainWindow inherits Window {
     fs := FocusScope {
         init => { self.focus(); }
         key-pressed(e) => {
+            if (root.intro) { root.intro = false; return accept; }
             if (root.dialog-mode != 0) {
                 if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Return) { root.dialog-accept(); }
                 else if ((root.dialog-mode == 1 || root.dialog-mode == 3) && e.text == Key.Escape) { root.dialog-cancel(); }

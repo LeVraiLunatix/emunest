@@ -34,35 +34,79 @@ pub enum Sound {
     Toast,
     /// erreur
     Error,
-    /// démarrage d'EmuNest
+    /// démarrage sans animation
     Start,
+    /// animation de démarrage (≈ 4 s)
+    Intro,
 }
 
 // ---------------------------------------------------------------------------------------------
-// Synthèse
+// Synthèse : sons chauds et ronds (graves-médiums, attaques douces, filtre passe-bas, réverbération sombre)
 // ---------------------------------------------------------------------------------------------
 
-/// Une note : somme de partiels (multiple de fréquence, amplitude) avec attaque de 2 ms et décroissance exponentielle.
-fn note(freq: f32, secs: f32, decay: f32, partials: &[(f32, f32)], amp: f32) -> Vec<f32> {
-    let n = (secs * SR as f32) as usize;
-    (0..n)
+use std::f32::consts::PI;
+
+const FS: f32 = SR as f32;
+
+fn n(secs: f32) -> usize {
+    (secs * FS) as usize
+}
+
+/// Note douce : partiels harmoniques, attaque en « smoothstep », décroissance exponentielle et petit glissando
+/// de hauteur vers la note (`glide` = écart relatif de départ, ex. -0.08 = part 8 % plus bas) qui donne le côté « bloop ».
+fn tone(freq: f32, secs: f32, attack: f32, decay: f32, partials: &[(f32, f32)], glide: f32, amp: f32) -> Vec<f32> {
+    let mut phase = 0.0f32;
+    let total = n(secs);
+    (0..total)
         .map(|i| {
-            let t = i as f32 / SR as f32;
-            let env = (1.0 - (-t / 0.002).exp()) * (-t / decay).exp();
-            let s: f32 = partials.iter().map(|(m, a)| a * (2.0 * std::f32::consts::PI * freq * m * t).sin()).sum();
-            s * env * amp
+            let t = i as f32 / FS;
+            let f = freq * (1.0 + glide * (-t / 0.045).exp());
+            phase += 2.0 * PI * f / FS;
+            let a = (t / attack).min(1.0);
+            let env = a * a * (3.0 - 2.0 * a) * (-t / decay).exp();
+            let s: f32 = partials.iter().map(|(m, g)| g * (phase * m).sin()).sum();
+            // fondu de sortie sur les 25 dernières ms : jamais de clic
+            let tail = ((total - i) as f32 / (0.025 * FS)).min(1.0);
+            s * env * tail * amp
         })
         .collect()
 }
 
-/// Partiels d'un tintement de verre (légèrement inharmoniques, comme une cloche fine).
-const GLASS: &[(f32, f32)] = &[(1.0, 1.0), (2.76, 0.32), (5.40, 0.12)];
-/// Partiels d'un son plus rond (touche, erreur).
-const SOFT: &[(f32, f32)] = &[(1.0, 1.0), (2.0, 0.22), (3.0, 0.08)];
+/// Un son rond : fondamentale + un peu de 2e et 3e harmonique.
+const ROUND: &[(f32, f32)] = &[(1.0, 1.0), (2.0, 0.16), (3.0, 0.04)];
+/// Plus pur, pour les notes aiguës.
+const PURE: &[(f32, f32)] = &[(1.0, 1.0), (2.0, 0.07)];
+
+/// Souffle d'air : bruit filtré dont la brillance monte (`rising`) ou descend, avec une enveloppe en cloche.
+fn swish(secs: f32, rising: bool, amp: f32) -> Vec<f32> {
+    let total = n(secs);
+    let (mut seed, mut y) = (0x9E37_79B9u32, 0.0f32);
+    (0..total)
+        .map(|i| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let noise = (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+            let p = i as f32 / total as f32;
+            let bell = (PI * p).sin().powi(2);
+            let fc = if rising { 300.0 + 1500.0 * p } else { 1800.0 - 1500.0 * p };
+            y += (1.0 - (-2.0 * PI * fc / FS).exp()) * (noise - y);
+            y * bell * amp
+        })
+        .collect()
+}
+
+/// Filtre passe-bas à un pôle : adoucit tout ce qui dépasse `cutoff` Hz.
+fn lowpass(buf: &mut [f32], cutoff: f32) {
+    let a = 1.0 - (-2.0 * PI * cutoff / FS).exp();
+    let mut y = 0.0;
+    for s in buf.iter_mut() {
+        y += a * (*s - y);
+        *s = y;
+    }
+}
 
 /// Place des sons les uns après les autres (décalages en millisecondes).
 fn mix(parts: Vec<(u32, Vec<f32>)>) -> Vec<f32> {
-    let len = parts.iter().map(|(ms, b)| ms * SR / 1000 + b.len() as u32).max().unwrap_or(0) as usize;
+    let len = parts.iter().map(|(ms, b)| (ms * SR / 1000) as usize + b.len()).max().unwrap_or(0);
     let mut out = vec![0.0; len];
     for (ms, buf) in parts {
         let off = (ms * SR / 1000) as usize;
@@ -73,122 +117,201 @@ fn mix(parts: Vec<(u32, Vec<f32>)>) -> Vec<f32> {
     out
 }
 
-/// Réverbération légère : trois échos amortis qui donnent de l'air sans empâter.
-fn reverb(buf: Vec<f32>, wet: f32) -> Vec<f32> {
-    let tail = (0.18 * SR as f32) as usize;
-    let mut out = buf.clone();
-    out.resize(buf.len() + tail, 0.0);
-    for (delay_ms, gain) in [(29u32, 0.38f32), (41, 0.27), (57, 0.18), (83, 0.10)] {
-        let d = (delay_ms * SR / 1000) as usize;
-        for (i, s) in buf.iter().enumerate() {
-            out[i + d] += s * gain * wet;
+/// Réverbération sombre (4 peignes amortis + 2 passe-tout, à la Schroeder) : de l'espace, sans brillance.
+fn reverb(dry: Vec<f32>, wet: f32, tail: f32) -> Vec<f32> {
+    let len = dry.len() + n(tail);
+    let mut input = dry.clone();
+    input.resize(len, 0.0);
+    let mut acc = vec![0.0f32; len];
+    for (delay_ms, fb) in [(29.7f32, 0.80f32), (37.1, 0.78), (41.1, 0.76), (43.7, 0.74)] {
+        let d = n(delay_ms / 1000.0);
+        let mut line = vec![0.0f32; len];
+        let mut damp = 0.0f32;
+        for i in 0..len {
+            let echo = if i >= d { line[i - d] } else { 0.0 };
+            damp += 0.45 * (echo - damp); // amortit les aigus dans la boucle de retour
+            line[i] = input[i] + damp * fb;
+            acc[i] += line[i] * 0.25;
         }
     }
-    out
+    for (delay_ms, g) in [(5.0f32, 0.7f32), (1.7, 0.7)] {
+        let d = n(delay_ms / 1000.0);
+        let src = acc.clone();
+        for i in 0..len {
+            let delayed = if i >= d { src[i - d] } else { 0.0 };
+            let out_prev = if i >= d { acc[i - d] } else { 0.0 };
+            acc[i] = -g * src[i] + delayed + g * out_prev;
+        }
+    }
+    lowpass(&mut acc, 2600.0);
+    dry.iter().chain(std::iter::repeat(&0.0)).zip(&acc).map(|(d, w)| d + w * wet).collect()
 }
 
-/// Normalise le pic à `peak` et ajoute un fondu de 6 ms en fin de son (pas de clic).
+/// Normalise le pic à `peak`, adoucit encore les aigus et ajoute un fondu final (pas de clic).
 fn finish(mut buf: Vec<f32>, peak: f32) -> Vec<f32> {
+    lowpass(&mut buf, 4200.0);
     let max = buf.iter().fold(0.0f32, |m, s| m.max(s.abs())).max(1e-6);
-    let fade = (0.006 * SR as f32) as usize;
+    let fade = n(0.03);
     let len = buf.len();
     for (i, s) in buf.iter_mut().enumerate() {
         *s *= peak / max;
         if i + fade > len {
-            *s *= (len - i) as f32 / fade as f32;
+            *s *= ((len - i) as f32 / fade as f32).powi(2);
         }
     }
     buf
 }
 
+/// Nappe douce : plusieurs sinus légèrement désaccordés (effet chœur), attaque lente, longue décroissance.
+fn pad(freq: f32, secs: f32, attack: f32, release: f32, amp: f32) -> Vec<f32> {
+    let total = n(secs);
+    (0..total)
+        .map(|i| {
+            let t = i as f32 / FS;
+            let a = (t / attack).min(1.0);
+            let env = a * a * (3.0 - 2.0 * a) * (-((t - attack).max(0.0)) / release).exp();
+            let mut s = 0.0;
+            for (detune, g) in [(-0.0016f32, 0.6f32), (0.0, 1.0), (0.0018, 0.6)] {
+                let f = freq * (1.0 + detune);
+                s += g * ((2.0 * PI * f * t).sin() + 0.18 * (2.0 * PI * 2.0 * f * t).sin());
+            }
+            let tail = ((total - i) as f32 / (0.08 * FS)).min(1.0);
+            s * env * tail * amp
+        })
+        .collect()
+}
+
 fn render(sound: Sound) -> Vec<f32> {
     use Sound::*;
-    let raw = match sound {
-        Move => finish(note(1318.5, 0.07, 0.014, GLASS, 1.0), 0.22),
+    match sound {
+        // déplacement : une goutte douce, à peine perceptible
+        Move => finish(tone(392.0, 0.16, 0.010, 0.050, ROUND, -0.06, 1.0), 0.17),
+        // changement de console : un souffle et deux notes qui se suivent
         Filter => finish(
-            mix(vec![(0, note(987.8, 0.12, 0.03, GLASS, 0.8)), (55, note(1318.5, 0.16, 0.04, GLASS, 1.0))]),
-            0.30,
+            reverb(
+                mix(vec![
+                    (0, swish(0.22, true, 0.5)),
+                    (20, tone(330.0, 0.24, 0.012, 0.07, ROUND, -0.05, 0.8)),
+                    (95, tone(440.0, 0.34, 0.014, 0.10, ROUND, -0.05, 1.0)),
+                ]),
+                0.35,
+                0.25,
+            ),
+            0.24,
         ),
+        // validation : sol → do, montant et chaleureux
         Select => finish(
-            reverb(mix(vec![(0, note(783.99, 0.20, 0.06, GLASS, 0.8)), (65, note(1046.5, 0.30, 0.09, GLASS, 1.0))]), 0.5),
-            0.38,
+            reverb(mix(vec![(0, tone(392.0, 0.26, 0.012, 0.09, ROUND, -0.05, 0.85)), (85, tone(523.25, 0.46, 0.014, 0.16, ROUND, -0.05, 1.0))]), 0.4, 0.3),
+            0.28,
         ),
+        // retour : do → sol, descendant et doux
         Back => finish(
-            reverb(mix(vec![(0, note(1046.5, 0.14, 0.04, GLASS, 0.8)), (60, note(783.99, 0.22, 0.07, GLASS, 0.9))]), 0.4),
-            0.30,
+            reverb(mix(vec![(0, tone(523.25, 0.22, 0.012, 0.07, ROUND, 0.04, 0.8)), (75, tone(349.23, 0.40, 0.014, 0.13, ROUND, 0.04, 0.95))]), 0.4, 0.28),
+            0.23,
         ),
+        // ouverture : un souffle qui monte puis deux notes
         Open => finish(
             reverb(
                 mix(vec![
-                    (0, note(659.25, 0.18, 0.05, GLASS, 0.7)),
-                    (42, note(880.0, 0.18, 0.05, GLASS, 0.85)),
-                    (84, note(1318.5, 0.30, 0.09, GLASS, 1.0)),
+                    (0, swish(0.30, true, 0.55)),
+                    (60, tone(293.66, 0.30, 0.016, 0.09, ROUND, -0.05, 0.8)),
+                    (150, tone(440.0, 0.50, 0.018, 0.16, ROUND, -0.05, 1.0)),
                 ]),
+                0.45,
+                0.32,
+            ),
+            0.27,
+        ),
+        // fermeture : le souffle redescend
+        Close => finish(
+            reverb(
+                mix(vec![
+                    (0, swish(0.26, false, 0.5)),
+                    (10, tone(440.0, 0.24, 0.012, 0.07, ROUND, 0.04, 0.8)),
+                    (90, tone(293.66, 0.40, 0.014, 0.12, ROUND, 0.04, 0.95)),
+                ]),
+                0.4,
+                0.3,
+            ),
+            0.22,
+        ),
+        // lancement : une nappe qui gonfle puis un arpège qui s'ouvre
+        Launch => finish(
+            reverb(
+                mix(vec![
+                    (0, swish(0.55, true, 0.6)),
+                    (0, pad(130.81, 1.4, 0.35, 0.5, 0.8)),
+                    (0, pad(196.0, 1.4, 0.40, 0.5, 0.55)),
+                    (160, tone(523.25, 0.55, 0.02, 0.20, PURE, -0.03, 0.8)),
+                    (260, tone(659.25, 0.55, 0.02, 0.20, PURE, -0.03, 0.85)),
+                    (360, tone(783.99, 0.65, 0.02, 0.24, PURE, -0.03, 0.9)),
+                    (470, tone(1046.5, 0.90, 0.02, 0.32, PURE, -0.03, 0.8)),
+                ]),
+                0.55,
                 0.5,
             ),
-            0.32,
+            0.36,
         ),
-        Close => finish(
-            reverb(mix(vec![(0, note(1318.5, 0.14, 0.04, GLASS, 0.8)), (48, note(880.0, 0.24, 0.07, GLASS, 0.9))]), 0.4),
-            0.26,
-        ),
-        Launch => {
-            // arpège ascendant do-mi-sol-do + nappe grave qui gonfle : le « on y va »
-            let pad: Vec<f32> = (0..(0.9 * SR as f32) as usize)
-                .map(|i| {
-                    let t = i as f32 / SR as f32;
-                    let swell = (t / 0.35).min(1.0) * (-((t - 0.35).max(0.0)) / 0.3).exp();
-                    ((2.0 * std::f32::consts::PI * 130.81 * t).sin() + 0.5 * (2.0 * std::f32::consts::PI * 196.0 * t).sin()) * swell * 0.35
-                })
-                .collect();
-            finish(
-                reverb(
-                    mix(vec![
-                        (0, pad),
-                        (0, note(523.25, 0.35, 0.14, GLASS, 0.8)),
-                        (75, note(659.25, 0.35, 0.14, GLASS, 0.85)),
-                        (150, note(783.99, 0.40, 0.16, GLASS, 0.9)),
-                        (225, note(1046.5, 0.70, 0.30, GLASS, 1.0)),
-                    ]),
-                    0.7,
-                ),
-                0.48,
-            )
-        }
+        // favori : trois gouttes qui montent
         Favorite => finish(
             reverb(
                 mix(vec![
-                    (0, note(1568.0, 0.14, 0.04, GLASS, 0.8)),
-                    (50, note(2093.0, 0.14, 0.04, GLASS, 0.85)),
-                    (100, note(2637.0, 0.30, 0.08, GLASS, 0.9)),
+                    (0, tone(523.25, 0.24, 0.016, 0.07, PURE, -0.03, 0.8)),
+                    (70, tone(659.25, 0.24, 0.016, 0.07, PURE, -0.03, 0.85)),
+                    (140, tone(783.99, 0.45, 0.018, 0.14, PURE, -0.03, 0.9)),
                 ]),
+                0.45,
+                0.3,
+            ),
+            0.22,
+        ),
+        // touche du clavier à l'écran : une pression feutrée
+        Key => finish(tone(311.0, 0.09, 0.006, 0.030, ROUND, -0.05, 1.0), 0.15),
+        Toast => finish(reverb(tone(440.0, 0.34, 0.014, 0.10, ROUND, -0.05, 1.0), 0.4, 0.25), 0.19),
+        // erreur : deux notes graves qui retombent, sans agressivité
+        Error => finish(
+            reverb(mix(vec![(0, tone(220.0, 0.26, 0.014, 0.09, ROUND, 0.0, 0.9)), (110, tone(174.61, 0.46, 0.016, 0.16, ROUND, 0.0, 1.0))]), 0.3, 0.25),
+            0.24,
+        ),
+        // démarrage sans animation : un accord clair et court
+        Start => finish(
+            reverb(
+                mix(vec![
+                    (0, tone(261.63, 0.7, 0.02, 0.25, ROUND, -0.03, 0.8)),
+                    (90, tone(329.63, 0.7, 0.02, 0.25, ROUND, -0.03, 0.85)),
+                    (180, tone(392.0, 0.9, 0.02, 0.30, ROUND, -0.03, 0.9)),
+                ]),
+                0.5,
                 0.5,
             ),
             0.28,
         ),
-        Key => finish(note(1046.5, 0.05, 0.010, SOFT, 1.0), 0.18),
-        Toast => finish(reverb(note(880.0, 0.20, 0.06, GLASS, 1.0), 0.4), 0.22),
-        Error => finish(mix(vec![(0, note(220.0, 0.22, 0.07, SOFT, 1.0)), (70, note(185.0, 0.30, 0.10, SOFT, 1.0))]), 0.32),
-        Start => finish(
+        // intro : grave qui respire, nappe Do add9 qui s'ouvre, puis trois étincelles pentatoniques
+        Intro => finish(
             reverb(
                 mix(vec![
-                    (0, note(523.25, 0.5, 0.20, GLASS, 0.7)),
-                    (110, note(659.25, 0.5, 0.20, GLASS, 0.8)),
-                    (220, note(783.99, 0.5, 0.22, GLASS, 0.9)),
-                    (330, note(987.77, 0.9, 0.34, GLASS, 1.0)),
+                    (0, swish(1.6, true, 0.45)),
+                    (0, pad(65.41, 4.2, 1.3, 1.4, 0.9)),
+                    (0, pad(130.81, 4.2, 1.2, 1.5, 0.7)),
+                    (150, pad(196.0, 4.0, 1.2, 1.4, 0.5)),
+                    (300, pad(293.66, 3.8, 1.1, 1.3, 0.38)),
+                    (450, pad(329.63, 3.6, 1.1, 1.3, 0.34)),
+                    (1250, tone(659.25, 1.4, 0.05, 0.50, PURE, 0.0, 0.5)),
+                    (1480, tone(783.99, 1.4, 0.05, 0.50, PURE, 0.0, 0.5)),
+                    (1720, tone(1046.5, 1.8, 0.05, 0.60, PURE, 0.0, 0.55)),
                 ]),
-                0.8,
+                0.65,
+                1.0,
             ),
-            0.34,
+            0.40,
         ),
-    };
-    raw
+    }
 }
 
 /// Tous les sons rendus en mémoire (pour les tests et l'aperçu WAV).
 pub fn render_all() -> Vec<(Sound, Vec<f32>)> {
     use Sound::*;
-    [Move, Filter, Select, Back, Open, Close, Launch, Favorite, Key, Toast, Error, Start].into_iter().map(|s| (s, render(s))).collect()
+    [Move, Filter, Select, Back, Open, Close, Launch, Favorite, Key, Toast, Error, Start, Intro].into_iter().map(|s| (s, render(s))).collect()
 }
 
 /// Écrit un WAV 16 bits mono (aperçu hors application).
@@ -292,25 +415,42 @@ pub fn is_enabled() -> bool {
 mod tests {
     use super::*;
 
+    /// Proportion d'énergie dans les variations rapides (différence première) : ~0,013 pour un sinus à 800 Hz.
+    /// Un son « brillant » (cloche, aigus) dépasse largement 0,05 ; les nôtres doivent rester chauds.
+    fn brightness(buf: &[f32]) -> f32 {
+        let e: f32 = buf.iter().map(|s| s * s).sum();
+        let d: f32 = buf.windows(2).map(|w| (w[1] - w[0]).powi(2)).sum();
+        d / e.max(1e-9)
+    }
+
     #[test]
     fn every_sound_is_finite_quiet_enough_and_click_free() {
         for (sound, buf) in render_all() {
             assert!(!buf.is_empty(), "{sound:?} vide");
             assert!(buf.iter().all(|s| s.is_finite()), "{sound:?} contient NaN/inf");
             let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-            assert!((0.05..=0.6).contains(&peak), "{sound:?} : pic {peak} hors de la plage douce");
+            assert!((0.05..=0.45).contains(&peak), "{sound:?} : pic {peak} hors de la plage douce");
             assert!(buf.last().unwrap().abs() < 0.01, "{sound:?} ne finit pas à zéro (clic)");
             assert!(buf[0].abs() < 0.01, "{sound:?} ne commence pas à zéro (clic)");
             let secs = buf.len() as f32 / SR as f32;
-            assert!(secs < 1.6, "{sound:?} trop long : {secs} s");
+            assert!(secs < 5.5, "{sound:?} trop long : {secs} s");
         }
     }
 
     #[test]
-    fn short_ui_sounds_stay_short() {
+    fn sounds_are_warm_not_bright() {
+        for (sound, buf) in render_all() {
+            let b = brightness(&buf);
+            assert!(b < 0.045, "{sound:?} trop brillant : {b:.4}");
+        }
+    }
+
+    #[test]
+    fn short_ui_sounds_stay_short_and_the_intro_is_long_enough() {
         let get = |s: Sound| render(s).len() as f32 / SR as f32;
-        assert!(get(Sound::Move) < 0.15);
-        assert!(get(Sound::Key) < 0.12);
+        assert!(get(Sound::Move) < 0.25);
+        assert!(get(Sound::Key) < 0.2);
+        assert!(get(Sound::Intro) > 3.0);
     }
 
     #[test]
