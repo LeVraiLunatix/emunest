@@ -1158,8 +1158,11 @@ export component MainWindow inherits Window {
         background: #04060c;
         opacity: 1 - clamp((self.t - 0.86) / 0.14, 0, 1);
         TouchArea { clicked => { root.intro = false; } }
+        // centre du logo : halo, anneaux et lueur s'organisent autour de lui (pas du centre de l'écran)
+        property <length> cy: root.height / 2 - (70px * Scale.k);
         // halo d'ambiance
         Rectangle {
+            y: iv.cy - self.height / 2;
             width: (1500px * Scale.k);
             height: (1500px * Scale.k);
             border-radius: (750px * Scale.k);
@@ -1169,6 +1172,7 @@ export component MainWindow inherits Window {
         // trois anneaux qui s'élargissent doucement depuis le logo
         for k in [0, 1, 2]: Rectangle {
             property <float> p: clamp((iv.t - 0.18 - k * 0.11) / 0.55, 0, 1);
+            y: iv.cy - self.height / 2;
             width: (220px * Scale.k) + self.p * (1100px * Scale.k);
             height: self.width;
             border-radius: self.width / 2;
@@ -1178,6 +1182,7 @@ export component MainWindow inherits Window {
         }
         // lueur derrière le logo
         Rectangle {
+            y: iv.cy - self.height / 2;
             width: (520px * Scale.k);
             height: (520px * Scale.k);
             border-radius: (260px * Scale.k);
