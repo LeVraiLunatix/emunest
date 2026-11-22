@@ -79,22 +79,6 @@ const ROUND: &[(f32, f32)] = &[(1.0, 1.0), (2.0, 0.16), (3.0, 0.04)];
 /// Plus pur, pour les notes aiguës.
 const PURE: &[(f32, f32)] = &[(1.0, 1.0), (2.0, 0.07)];
 
-/// Souffle d'air : bruit filtré dont la brillance monte (`rising`) ou descend, avec une enveloppe en cloche.
-fn swish(secs: f32, rising: bool, amp: f32) -> Vec<f32> {
-    let total = n(secs);
-    let (mut seed, mut y) = (0x9E37_79B9u32, 0.0f32);
-    (0..total)
-        .map(|i| {
-            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            let noise = (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
-            let p = i as f32 / total as f32;
-            let bell = (PI * p).sin().powi(2);
-            let fc = if rising { 300.0 + 1500.0 * p } else { 1800.0 - 1500.0 * p };
-            y += (1.0 - (-2.0 * PI * fc / FS).exp()) * (noise - y);
-            y * bell * amp
-        })
-        .collect()
-}
 
 /// Filtre passe-bas à un pôle : adoucit tout ce qui dépasse `cutoff` Hz.
 fn lowpass(buf: &mut [f32], cutoff: f32) {
@@ -233,7 +217,11 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
         Some(p) => p.note(freq, secs, attack, release * 2.0, amp * 0.8),
         None => pad(freq, secs, attack, release, amp),
     };
-    let swish = |secs: f32, rising: bool, amp: f32| swish(secs, rising, if bank.bell.is_some() { amp * 0.15 } else { amp });
+    // basse douce (808 réel) : même couleur que l'intro, jamais plus qu'un souffle grave
+    let low = |secs: f32, amp: f32| match &bank.bass {
+        Some(b) => b.note(65.41, secs, 0.20, secs * 0.4, amp),
+        None => pad(65.41, secs, 0.3, secs * 0.4, amp * 0.5),
+    };
     match sound {
         // déplacement : une goutte douce, à peine perceptible
         Move => finish(tone(392.0, 0.16, 0.010, 0.050, ROUND, -0.06, 1.0), 0.17),
@@ -241,7 +229,6 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
         Filter => finish(
             reverb(
                 mix(vec![
-                    (0, swish(0.22, true, 0.5)),
                     (20, tone(330.0, 0.24, 0.012, 0.07, ROUND, -0.05, 0.8)),
                     (95, tone(440.0, 0.34, 0.014, 0.10, ROUND, -0.05, 1.0)),
                 ]),
@@ -257,14 +244,13 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
         ),
         // retour : do → sol, descendant et doux
         Back => finish(
-            reverb(mix(vec![(0, tone(523.25, 0.22, 0.012, 0.07, ROUND, 0.04, 0.8)), (75, tone(349.23, 0.40, 0.014, 0.13, ROUND, 0.04, 0.95))]), 0.4, 0.28),
+            reverb(mix(vec![(0, tone(523.25, 0.22, 0.012, 0.07, ROUND, 0.04, 0.8)), (75, tone(392.0, 0.40, 0.014, 0.13, ROUND, 0.04, 0.95))]), 0.4, 0.28),
             0.23,
         ),
         // ouverture : un souffle qui monte puis deux notes
         Open => finish(
             reverb(
                 mix(vec![
-                    (0, swish(0.30, true, 0.55)),
                     (60, tone(293.66, 0.30, 0.016, 0.09, ROUND, -0.05, 0.8)),
                     (150, tone(440.0, 0.50, 0.018, 0.16, ROUND, -0.05, 1.0)),
                 ]),
@@ -277,7 +263,6 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
         Close => finish(
             reverb(
                 mix(vec![
-                    (0, swish(0.26, false, 0.5)),
                     (10, tone(440.0, 0.24, 0.012, 0.07, ROUND, 0.04, 0.8)),
                     (90, tone(293.66, 0.40, 0.014, 0.12, ROUND, 0.04, 0.95)),
                 ]),
@@ -290,9 +275,8 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
         Launch => finish(
             reverb(
                 mix(vec![
-                    (0, swish(0.55, true, 0.6)),
-                    (0, pad(130.81, 1.4, 0.35, 0.5, 0.8)),
-                    (0, pad(196.0, 1.4, 0.40, 0.5, 0.55)),
+                    (0, low(1.8, 0.45)),
+                    (0, pad(130.81, 1.6, 0.35, 0.6, 0.7)),
                     (160, tone(523.25, 0.55, 0.02, 0.20, PURE, -0.03, 0.8)),
                     (260, tone(659.25, 0.55, 0.02, 0.20, PURE, -0.03, 0.85)),
                     (360, tone(783.99, 0.65, 0.02, 0.24, PURE, -0.03, 0.9)),
@@ -317,17 +301,18 @@ fn render_with(sound: Sound, bank: &Bank) -> Vec<f32> {
             0.22,
         ),
         // touche du clavier à l'écran : une pression feutrée
-        Key => finish(tone(311.0, 0.09, 0.006, 0.030, ROUND, -0.05, 1.0), 0.15),
+        Key => finish(tone(329.63, 0.09, 0.006, 0.030, ROUND, -0.05, 1.0), 0.15),
         Toast => finish(reverb(tone(440.0, 0.34, 0.014, 0.10, ROUND, -0.05, 1.0), 0.4, 0.25), 0.19),
         // erreur : deux notes graves qui retombent, sans agressivité
         Error => finish(
-            reverb(mix(vec![(0, tone(220.0, 0.26, 0.014, 0.09, ROUND, 0.0, 0.9)), (110, tone(174.61, 0.46, 0.016, 0.16, ROUND, 0.0, 1.0))]), 0.3, 0.25),
+            reverb(mix(vec![(0, tone(220.0, 0.26, 0.014, 0.09, ROUND, 0.0, 0.9)), (110, tone(196.0, 0.46, 0.016, 0.16, ROUND, 0.0, 1.0))]), 0.3, 0.25),
             0.24,
         ),
         // démarrage sans animation : un accord clair et court
         Start => finish(
             reverb(
                 mix(vec![
+                    (0, low(1.6, 0.4)),
                     (0, tone(261.63, 0.7, 0.02, 0.25, ROUND, -0.03, 0.8)),
                     (90, tone(329.63, 0.7, 0.02, 0.25, ROUND, -0.03, 0.85)),
                     (180, tone(392.0, 0.9, 0.02, 0.30, ROUND, -0.03, 0.9)),
