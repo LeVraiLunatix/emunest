@@ -1178,7 +1178,7 @@ export component MainWindow inherits Window {
             border-radius: self.width / 2;
             border-width: (2px * Scale.k);
             border-color: #bcd0ff;
-            opacity: (1 - self.p) * 0.45 * clamp(iv.t * 8, 0, 1);
+            opacity: clamp(self.p * 8, 0, 1) * (1 - self.p) * 0.45; // invisible tant que l'anneau n'est pas parti
         }
         // lueur derrière le logo
         Rectangle {
