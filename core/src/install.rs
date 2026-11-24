@@ -1,6 +1,6 @@
 //! Installation d'un émulateur : trouve la dernière version, la télécharge (avec progression),
 //! vérifie son empreinte quand le site la publie, l'extrait dans le dossier géré par EmuNest.
-use crate::launch::{find_in, managed_dir};
+use crate::launch::{emulators_root, find_in, managed_dir};
 use anyhow::{bail, Context, Result};
 use emunest_emulators::{Profile, Source};
 use sha2::{Digest, Sha256};
@@ -170,7 +170,7 @@ pub fn install(data: &Path, profile: &Profile, progress: &mut dyn FnMut(Phase, f
     tracing::info!("installation de {} : {}", profile.name, asset.url);
 
     let final_dir = managed_dir(data, profile);
-    let work = data.join("emulators").join(format!(".tmp-{}", profile.name.to_lowercase()));
+    let work = emulators_root(data).join(format!(".tmp-{}", profile.name.to_lowercase()));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work)?;
 
@@ -232,6 +232,16 @@ mod tests {
         let html = r#"<a href="https://dl.dolphin-emu.org/builds/09/39/dolphin-master-2609-308-x64.7z">x</a><a href="https://dl.dolphin-emu.org/builds/0a/05/dolphin-master-2609-293-x64.7z">"#;
         assert_eq!(first_link(html, "-x64.7z").as_deref(), Some("https://dl.dolphin-emu.org/builds/09/39/dolphin-master-2609-308-x64.7z"));
         assert_eq!(first_link(html, ".zip"), None);
+    }
+
+    /// Machine réelle : dit quels émulateurs gérés seraient mis à jour.
+    #[test]
+    #[ignore]
+    fn outdated_here() {
+        let data = std::path::PathBuf::from(std::env::var("USERPROFILE").unwrap()).join(".emunest");
+        for p in emunest_emulators::builtin_profiles().unwrap() {
+            eprintln!("{} exe={:?} outdated={:?}", p.name, crate::launch::find_executable(&data, &p), is_outdated(&data, &p).map_err(|e| e.to_string()));
+        }
     }
 
     /// Réseau : `cargo test -p emunest-core -- --ignored` installe vraiment mGBA (13 Mo) dans un dossier temporaire.

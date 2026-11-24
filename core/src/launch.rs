@@ -7,9 +7,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use walkdir::WalkDir;
 
+/// Dossier qui contient les émulateurs gérés (`emulators_dir` de config.toml, sinon `<données>/emulators`).
+pub fn emulators_root(data: &Path) -> PathBuf {
+    crate::config::load(data).emulators_dir.unwrap_or_else(|| data.join("emulators"))
+}
+
 /// Dossier où EmuNest range les émulateurs qu'il gère.
 pub fn managed_dir(data: &Path, profile: &Profile) -> PathBuf {
-    data.join("emulators").join(profile.name.to_lowercase())
+    emulators_root(data).join(profile.name.to_lowercase())
 }
 
 /// Chemin de l'exécutable de l'émulateur, s'il est installé.

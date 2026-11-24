@@ -26,6 +26,8 @@ pub struct Config {
     /// émulateurs déjà installés ailleurs : nom du profil -> chemin de l'exécutable
     #[serde(default)]
     pub emulators: BTreeMap<String, PathBuf>,
+    /// dossier où EmuNest installe les émulateurs ; par défaut `<données>/emulators`
+    pub emulators_dir: Option<PathBuf>,
     /// dossier des sauvegardes de jeu (zip) ; par défaut `<données>/backups`
     pub backup_dir: Option<PathBuf>,
     /// sauvegarde automatique des saves après chaque partie
@@ -57,7 +59,7 @@ fn default_volume() -> f32 {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { roms: vec![], emulators: BTreeMap::new(), backup_dir: None, auto_backup: false, sound: true, volume: 0.6, intro: true, auto_update: true, github_token: None }
+        Self { roms: vec![], emulators: BTreeMap::new(), emulators_dir: None, backup_dir: None, auto_backup: false, sound: true, volume: 0.6, intro: true, auto_update: true, github_token: None }
     }
 }
 

@@ -802,7 +802,7 @@ export component MainWindow inherits Window {
                 // aux deux extrémités de la boucle (là où une tuile saute de l'autre côté) la tuile est invisible :
                 // elle s'efface avant le saut et réapparaît après, au lieu de surgir d'un coup
                 property <float> fade: inf ? Math.clamp(Math.min(d + Math.floor(root.games.length / 2), (root.games.length - 1 - Math.floor(root.games.length / 2)) - d), 0, 1) : 1;
-                animate fade { duration: snap ? 0ms : 420ms; }
+                animate fade { duration: 150ms; } // plus vive que le déplacement : la tuile a disparu avant de sauter, même en défilant vite
                 opacity: appear * fade;
                 animate x, y, width, height { duration: snap ? 0ms : 420ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
 
