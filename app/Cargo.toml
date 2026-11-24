@@ -12,6 +12,7 @@ emunest-metadata = { path = "../metadata" }
 emunest-emulators = { path = "../emulators" }
 emunest-ui = { path = "../ui" }
 gilrs = "0.11.2"
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation"] }
 notify = "9.0.0"
 rfd = "0.18.0"
 emunest-sound = { version = "0.1.0", path = "../sound" }

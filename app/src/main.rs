@@ -163,6 +163,43 @@ fn ensure_files(ui: &Ui, exe: &Path, profile: &Profile) -> bool {
     }
 }
 
+/// Vrai quand le processus `pid` a une fenêtre visible (l'émulateur est à l'écran).
+fn has_window(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible};
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let (pid, found) = unsafe { &mut *(lparam as *mut (u32, bool)) };
+        let mut owner = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
+        if owner == *pid && unsafe { IsWindowVisible(hwnd) } != 0 {
+            *found = true;
+            return 0; // trouvé : on arrête l'énumération
+        }
+        1
+    }
+    let mut state = (pid, false);
+    // SAFETY: `state` vit pendant tout l'appel, le callback ne le garde pas
+    unsafe { EnumWindows(Some(each), &mut state as *mut _ as LPARAM) };
+    state.1
+}
+
+/// Écran de chargement : reste affiché jusqu'à ce que l'émulateur ait ouvert sa fenêtre (30 s au plus).
+fn loading_screen(ui: &Ui, child: &mut std::process::Child, game: &str, emulator: &str) {
+    let title = game.to_string();
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(30) {
+        if matches!(child.try_wait(), Ok(Some(_))) || (start.elapsed() > Duration::from_secs(1) && has_window(child.id())) {
+            break;
+        }
+        // la barre avance de moins en moins vite : on ne connaît pas la durée réelle
+        let frac = 1.0 - (-(start.elapsed().as_secs_f32()) / 7.0).exp();
+        let (t, text) = (title.clone(), format!("Démarrage de {emulator}…"));
+        let _ = ui.upgrade_in_event_loop(move |w| emunest_ui::show_progress(&w, &t, &text, frac * 0.95));
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    let _ = ui.upgrade_in_event_loop(|w| emunest_ui::close_dialog(&w));
+}
+
 /// Réduit la fenêtre pendant que `child` tourne, puis la rend. Renvoie la durée de la partie.
 fn wait_minimized(ui: &Ui, child: &mut std::process::Child) -> Duration {
     let _ = ui.upgrade_in_event_loop(|w| w.window().set_minimized(true));
@@ -198,7 +235,12 @@ fn play(data: &Path, ui: &Ui, game: Game) {
         Err(e) => return toast(ui, format!("{e:#}")),
     };
     toast(ui, format!("{} — lancé avec {}", game.title, profile.name));
+    // Mario Galaxy : le pointeur de l'écran se pilote à la souris, le stick droit la remplace
+    let pointer = profile.name == "Ryujinx" && game.title.to_lowercase().contains("galaxy");
+    pad::POINTER.store(pointer, Ordering::SeqCst);
+    loading_screen(ui, &mut child, &game.title, &profile.name);
     let played = wait_minimized(ui, &mut child);
+    pad::POINTER.store(false, Ordering::SeqCst);
     tracing::info!("{} terminé après {played:?}", profile.name);
     if let Ok(lib) = db(data) {
         let _ = lib.record_play(&game.path, played.as_secs() as i64);

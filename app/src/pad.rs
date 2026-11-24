@@ -5,9 +5,33 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Vrai pendant un jeu dont le curseur se pilote à la souris (ex. Mario Galaxy, pointeur de l'écran) :
+/// le stick droit déplace alors le curseur Windows et R3 clique.
+pub static POINTER: AtomicBool = AtomicBool::new(false);
+const POINTER_SPEED: f32 = 14.0; // pixels par tour de boucle (30 ms) à pleine inclinaison
+
+fn move_cursor(dx: f32, dy: f32) {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
+    let mut p = POINT { x: 0, y: 0 };
+    // SAFETY: appels Win32 simples sur une structure locale
+    unsafe {
+        if GetCursorPos(&mut p) != 0 {
+            SetCursorPos(p.x + dx as i32, p.y + dy as i32);
+        }
+    }
+}
+
+fn click(down: bool) {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{mouse_event, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP};
+    // SAFETY: simple envoi d'un évènement souris
+    unsafe { mouse_event(if down { MOUSEEVENTF_LEFTDOWN } else { MOUSEEVENTF_LEFTUP }, 0, 0, 0, 0) };
+}
+
 const FIRST_REPEAT: Duration = Duration::from_millis(380);
 const REPEAT: Duration = Duration::from_millis(130);
 const STICK_ON: f32 = 0.55;
+const STICK_RELEASE: f32 = 0.3;
 
 /// Famille de la manette d'après son fabricant (USB) ou son nom.
 fn kind_of(g: &Gamepad) -> PadKind {
@@ -64,13 +88,21 @@ pub fn spawn(ui: Weak<MainWindow>, busy: Arc<AtomicBool>) {
             Ok(g) => g,
             Err(e) => return tracing::warn!("manette indisponible : {e}"),
         };
+        // Steam Input (et consorts) montre souvent la même manette deux fois : on ignore le doublon quasi simultané
+        let last = std::cell::Cell::new(None::<(Pad, Instant)>);
         let send = |p: Pad| {
+            let now = Instant::now();
+            if matches!(last.get(), Some((lp, t)) if lp == p && now.duration_since(t) < Duration::from_millis(40)) {
+                return;
+            }
+            last.set(Some((p, now)));
             if !busy.load(Ordering::SeqCst) {
                 let _ = ui.upgrade_in_event_loop(move |w| emunest_ui::pad_input(&w, p));
             }
         };
         let mut held: Option<(Source, Pad, Instant)> = None;
         let mut kind = PadKind::Generic;
+        let (mut rx, mut ry) = (0.0f32, 0.0f32); // stick droit (pour le curseur)
         loop {
             if let Some(ev) = gilrs.next_event_blocking(Some(Duration::from_millis(30))) {
                 // symboles de la manette qui vient de parler (changent si on en branche une autre)
@@ -80,6 +112,10 @@ pub fn spawn(ui: Weak<MainWindow>, busy: Arc<AtomicBool>) {
                     let _ = ui.upgrade_in_event_loop(move |w| emunest_ui::set_pad_kind(&w, seen));
                 }
                 match ev.event {
+                    EventType::ButtonPressed(Button::RightThumb, _) if POINTER.load(Ordering::SeqCst) => click(true),
+                    EventType::ButtonReleased(Button::RightThumb, _) if POINTER.load(Ordering::SeqCst) => click(false),
+                    EventType::AxisChanged(Axis::RightStickX, v, _) => rx = v,
+                    EventType::AxisChanged(Axis::RightStickY, v, _) => ry = v,
                     EventType::ButtonPressed(b, _) => {
                         if let Some(p) = map_button(b, kind) {
                             send(p);
@@ -96,11 +132,15 @@ pub fn spawn(ui: Weak<MainWindow>, busy: Arc<AtomicBool>) {
                     }
                     EventType::AxisChanged(axis @ (Axis::LeftStickX | Axis::LeftStickY), v, _) => {
                         // X : gauche / droite ; Y (positif = haut) : haut / bas
+                        let x_axis = axis == Axis::LeftStickX;
+                        // hystérésis : une fois poussé, le stick reste « tenu » jusqu'à 0.3 (évite les doubles pas)
+                        let holding = matches!(held, Some((Source::Stick, cur, _)) if matches!(cur, Pad::Step(_)) == x_axis);
+                        let on = if holding { STICK_RELEASE } else { STICK_ON };
                         let dir = match axis {
-                            Axis::LeftStickX if v > STICK_ON => Some(Pad::Step(1)),
-                            Axis::LeftStickX if v < -STICK_ON => Some(Pad::Step(-1)),
-                            Axis::LeftStickY if v > STICK_ON => Some(Pad::Up),
-                            Axis::LeftStickY if v < -STICK_ON => Some(Pad::Down),
+                            Axis::LeftStickX if v > on => Some(Pad::Step(1)),
+                            Axis::LeftStickX if v < -on => Some(Pad::Step(-1)),
+                            Axis::LeftStickY if v > on => Some(Pad::Up),
+                            Axis::LeftStickY if v < -on => Some(Pad::Down),
                             _ => None,
                         };
                         match (dir, held) {
@@ -109,13 +149,17 @@ pub fn spawn(ui: Weak<MainWindow>, busy: Arc<AtomicBool>) {
                                 send(d);
                                 held = Some((Source::Stick, d, Instant::now() + FIRST_REPEAT));
                             }
-                            (None, Some((Source::Stick, _, _))) => held = None,
+                            // seul l'axe qui tient la direction peut la relâcher (l'autre axe qui revient à zéro ne compte pas)
+                            (None, Some((Source::Stick, _, _))) if holding => held = None,
                             _ => {}
                         }
                     }
                     EventType::Disconnected => held = None,
                     _ => {}
                 }
+            }
+            if POINTER.load(Ordering::SeqCst) && (rx.abs() > 0.12 || ry.abs() > 0.12) {
+                move_cursor(rx * POINTER_SPEED, -ry * POINTER_SPEED); // Y de la manette : positif = haut
             }
             if let Some((src, p, next)) = held {
                 if Instant::now() >= next {
