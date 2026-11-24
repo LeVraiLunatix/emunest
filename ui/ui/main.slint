@@ -513,10 +513,8 @@ export component MainWindow inherits Window {
         y: 0;
         width: root.width;
         height: root.height;
-        if i == root.sel && g.has-cover: Image {
-            property <float> t: 0;
-            init => { self.t = 1; }
-            animate t { duration: 700ms; easing: ease-out; }
+        // toutes les jaquettes restent en place : l'ancien fond s'efface pendant que le nouveau apparaît (pas de saut)
+        if g.has-cover: Image {
             source: g.bg;
             image-fit: fill;
             width: root.width * (root.kb ? 1.35 : 1.1);
@@ -524,7 +522,8 @@ export component MainWindow inherits Window {
             x: -(self.width - root.width) * (root.kb ? 0.8 : 0.2);
             y: -(self.height - root.height) * (root.kb ? 0.3 : 0.7);
             animate width, height, x, y { duration: 18s; easing: ease-in-out; }
-            opacity: t * 0.4;
+            opacity: i == root.sel ? 0.4 : 0;
+            animate opacity { duration: 700ms; easing: ease-in-out; }
         }
     }
     // voile de lisibilité : sombre à gauche (texte) et en bas (carrousel)
@@ -800,8 +799,11 @@ export component MainWindow inherits Window {
                 height: h;
                 x: (inf ? (d == 0 ? c : (d > 0 ? c + sw + gap + (d - 1) * (tw + gap) : c + d * (tw + gap))) : off + pad + i * (tw + gap) + (i > root.sel ? sw - tw : (0px * Scale.k))) + (slot - w) / 2;
                 y: (492px * Scale.k) - h / 2;
-                // hors écran : on ne voit pas une jaquette traverser l'écran en repassant de l'autre côté
-                opacity: (inf && abs(d) > 4) ? 0 : appear;
+                // aux deux extrémités de la boucle (là où une tuile saute de l'autre côté) la tuile est invisible :
+                // elle s'efface avant le saut et réapparaît après, au lieu de surgir d'un coup
+                property <float> fade: inf ? Math.clamp(Math.min(d + Math.floor(root.games.length / 2), (root.games.length - 1 - Math.floor(root.games.length / 2)) - d), 0, 1) : 1;
+                animate fade { duration: snap ? 0ms : 420ms; }
+                opacity: appear * fade;
                 animate x, y, width, height { duration: snap ? 0ms : 420ms; easing: cubic-bezier(0.22, 0.8, 0.28, 1); }
 
                 // un clic sélectionne ; un second clic sur la jaquette sélectionnée lance le jeu
