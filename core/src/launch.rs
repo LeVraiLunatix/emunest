@@ -18,7 +18,40 @@ pub fn find_executable(data: &Path, profile: &Profile) -> Option<PathBuf> {
     if let Some(p) = cfg.emulators.get(&profile.name).filter(|p| p.is_file()) {
         return Some(p.clone());
     }
-    find_in(&managed_dir(data, profile), &profile.executable)
+    find_in(&managed_dir(data, profile), &profile.executable).or_else(|| detect(profile))
+}
+
+/// Cherche un émulateur déjà installé sur le PC : EmuDeck, Program Files, et les dossiers à la racine
+/// des disques dont le nom contient celui de l'émulateur (PCSX2, rpcs3…).
+pub fn detect(profile: &Profile) -> Option<PathBuf> {
+    let name = profile.name.to_lowercase();
+    let var = |v: &str| std::env::var(v).ok().map(PathBuf::from);
+    let mut roots: Vec<PathBuf> = ["APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"].iter().filter_map(|v| var(v)).collect();
+    if let Some(a) = var("APPDATA") {
+        roots.push(a.join("emudeck").join("Emulators"));
+    }
+    if let Some(l) = var("LOCALAPPDATA") {
+        roots.push(l.join("Programs"));
+    }
+    let drives = (b'C'..=b'Z').map(|d| PathBuf::from(format!("{}:\\", d as char))).filter(|d| d.is_dir());
+    let named = |dir: &Path| {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir() && e.file_name().to_string_lossy().to_lowercase().contains(&name))
+            .find_map(|e| find_in(&e.path(), &profile.executable))
+    };
+    // les dossiers « Emulateurs » / « Games » à la racine peuvent contenir un dossier au nom de l'émulateur
+    let mut all: Vec<PathBuf> = roots;
+    for d in drives {
+        all.push(d.clone());
+        all.extend(std::fs::read_dir(&d).into_iter().flatten().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| {
+            let n = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            p.is_dir() && (n.contains("emu") || n.contains("jeux") || n.contains("games"))
+        }));
+    }
+    all.iter().find_map(|r| named(r))
 }
 
 /// Cherche `name` dans `dir` : les archives s'extraient souvent dans un sous-dossier, profondeur limitée à 3.
@@ -128,6 +161,15 @@ pub fn launch(exe: &Path, profile: &Profile, rom: &Path, extra: &str) -> Result<
 
 #[cfg(all(test, windows))]
 mod tests {
+    /// Machine réelle : `cargo test -p emunest-core -- --ignored detect_here --nocapture`
+    #[test]
+    #[ignore]
+    fn detect_here() {
+        for p in emunest_emulators::builtin_profiles().unwrap() {
+            eprintln!("{} -> {:?}", p.name, detect(&p));
+        }
+    }
+
     use super::*;
     use emunest_emulators::Source;
 

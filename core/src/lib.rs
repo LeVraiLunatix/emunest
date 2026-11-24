@@ -71,7 +71,22 @@ fn clean_title(stem: &str) -> String {
             _ => depth == 0,
         })
         .collect();
-    let t = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    // « Super_Mario_Galaxy_010099C022B96000v0 » (nom de dump Switch) : on retire l'identifiant de titre et la version
+    let mut flat = flat.replace('_', " ");
+    if let Some(i) = flat.rfind(' ') {
+        let id = flat[i + 1..].to_lowercase();
+        if let Some((hex, ver)) = id.split_once('v') {
+            if hex.len() == 16 && hex.starts_with("01") && hex.chars().all(|c| c.is_ascii_hexdigit()) && ver.chars().all(|c| c.is_ascii_digit()) {
+                flat.truncate(i);
+            }
+        }
+    }
+    let mut words: Vec<&str> = flat.split_whitespace().collect();
+    // "Super Mario Odyssey v1.3.0_" : une version collée au nom brouille la recherche de jaquette
+    if words.len() > 1 && words.last().is_some_and(|w| w.strip_prefix('v').is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()) && v.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '_'))) {
+        words.pop();
+    }
+    let t = words.join(" ");
     if t.is_empty() { stem.trim().to_string() } else { t }
 }
 
@@ -260,6 +275,13 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleans_switch_dump_names() {
+        assert_eq!(clean_title("Super_Mario_Galaxy_2_0100FD8022DAA000v0"), "Super Mario Galaxy 2");
+        assert_eq!(clean_title("Super_Mario_3D_All-Stars"), "Super Mario 3D All-Stars");
+        assert_eq!(clean_title("[ROMsNS] Luigis Mansion 3 [0100DCA0064A6000][US][v0]"), "Luigis Mansion 3");
+    }
 
     #[test]
     fn scan_associates_and_prunes() {

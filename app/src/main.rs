@@ -419,6 +419,30 @@ fn update_emulator(data: &Path, ui: &Ui, profile: &Profile) {
     }
 }
 
+/// Au démarrage : installe tout seul les émulateurs dont la bibliothèque a besoin et qui manquent, et met à jour
+/// ceux qu'EmuNest gère (jamais ceux installés ailleurs : leurs réglages ne nous appartiennent pas).
+fn sync_emulators(data: &Path, ui: &Ui) {
+    if !config::load(data).auto_update {
+        return;
+    }
+    let used: std::collections::BTreeSet<String> = db(data).and_then(|l| l.games()).map(|g| g.into_iter().map(|g| g.emulator).collect()).unwrap_or_default();
+    for p in emunest_emulators::builtin_profiles().unwrap_or_default() {
+        if matches!(p.source, emunest_emulators::Source::Manual) {
+            continue;
+        }
+        let todo = match launch::find_executable(data, &p) {
+            None => used.contains(&p.name),
+            Some(exe) => exe.starts_with(launch::managed_dir(data, &p)) && install::is_outdated(data, &p).unwrap_or(false),
+        };
+        if todo {
+            match run_install(data, ui, &p) {
+                Ok(_) => toast(ui, format!("{} installé / à jour", p.name)),
+                Err(e) => tracing::warn!("{} : {e:#}", p.name),
+            }
+        }
+    }
+}
+
 /// Cherche une nouvelle version d'EmuNest ; `manual` = demandé par l'utilisateur (sinon silencieux sauf nouveauté).
 fn check_update(data: &Path, ui: &Ui, manual: bool) {
     let token = config::load(data).github_token.or_else(emunest_core::update::gh_token);
@@ -902,6 +926,8 @@ fn main() -> Result<()> {
     std::thread::spawn(move || {
         reload(&data, &weak);
         auto_update(&data, &weak); // la bibliothèque déjà connue s'affiche sans attendre le scan
+        let (d, w) = (data.clone(), weak.clone());
+        std::thread::spawn(move || sync_emulators(&d, &w));
         let dirs = rom_dirs(&data, &roms);
         if dirs.is_empty() {
             if let Ok(games) = db(&data).and_then(|l| l.games()) {

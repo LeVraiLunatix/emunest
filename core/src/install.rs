@@ -55,28 +55,32 @@ fn client() -> Result<reqwest::blocking::Client> {
         .build()?)
 }
 
+/// Dernière release d'un dépôt (GitHub ou Forgejo : même JSON) -> archive Windows x64.
+fn release_asset(http: &reqwest::blocking::Client, api: &str, repo: &str) -> Result<Asset> {
+    let resp = http.get(api).send()?;
+    if !resp.status().is_success() {
+        bail!("{repo} : aucune release trouvée (HTTP {})", resp.status());
+    }
+    let json: serde_json::Value = serde_json::from_slice(&resp.bytes()?)?;
+    let assets: Vec<Asset> = json["assets"]
+        .as_array()
+        .context("réponse inattendue")?
+        .iter()
+        .filter_map(|a| {
+            Some(Asset {
+                name: a["name"].as_str()?.to_string(),
+                url: a["browser_download_url"].as_str()?.to_string(),
+                sha256: a["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
+            })
+        })
+        .collect();
+    pick_asset(&assets).cloned().with_context(|| format!("{repo} : pas d'archive Windows x64 dans la dernière release"))
+}
+
 fn resolve(http: &reqwest::blocking::Client, source: &Source) -> Result<Asset> {
     match source {
-        Source::Github { repo } => {
-            let resp = http.get(format!("https://api.github.com/repos/{repo}/releases/latest")).send()?;
-            if !resp.status().is_success() {
-                bail!("{repo} : aucune release trouvée (HTTP {})", resp.status());
-            }
-            let json: serde_json::Value = serde_json::from_slice(&resp.bytes()?)?;
-            let assets: Vec<Asset> = json["assets"]
-                .as_array()
-                .context("réponse GitHub inattendue")?
-                .iter()
-                .filter_map(|a| {
-                    Some(Asset {
-                        name: a["name"].as_str()?.to_string(),
-                        url: a["browser_download_url"].as_str()?.to_string(),
-                        sha256: a["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
-                    })
-                })
-                .collect();
-            pick_asset(&assets).cloned().with_context(|| format!("{repo} : pas d'archive Windows x64 dans la dernière release"))
-        }
+        Source::Github { repo } => release_asset(http, &format!("https://api.github.com/repos/{repo}/releases/latest"), repo),
+        Source::Forge { host, repo } => release_asset(http, &format!("https://{host}/api/v1/repos/{repo}/releases/latest"), repo),
         Source::Manual => bail!("{} ne s'installe pas automatiquement : installe-le toi-même et indique son chemin dans config.toml", "cet émulateur"),
         Source::Url { url } => Ok(Asset { name: url.rsplit('/').next().unwrap_or("archive").to_string(), url: url.clone(), sha256: None }),
         Source::Page { url, ends_with } => {
@@ -132,6 +136,32 @@ fn extract(archive: &Path, name: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+const MARKER: &str = ".emunest-version";
+
+/// Vrai si une version plus récente que celle posée par EmuNest est disponible (ou si on ne sait pas laquelle est là).
+pub fn is_outdated(data: &Path, profile: &Profile) -> Result<bool> {
+    let asset = resolve(&client()?, &profile.source)?;
+    let have = std::fs::read_to_string(managed_dir(data, profile).join(MARKER)).unwrap_or_default();
+    Ok(have.trim() != asset.url)
+}
+
+/// Copie `from` par-dessus `to` sans rien supprimer : BIOS, sauvegardes et réglages d'un mode portable survivent.
+fn merge_over(from: &Path, to: &Path) -> Result<()> {
+    for e in walkdir::WalkDir::new(from).into_iter().filter_map(|e| e.ok()) {
+        let rel = e.path().strip_prefix(from)?;
+        let dest = to.join(rel);
+        if e.file_type().is_dir() {
+            std::fs::create_dir_all(&dest)?;
+        } else {
+            if let Some(d) = dest.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            std::fs::copy(e.path(), &dest)?;
+        }
+    }
+    Ok(())
+}
+
 /// Installe (ou met à jour) l'émulateur dans `<data>/emulators/<nom>/` et renvoie le chemin de son exécutable.
 pub fn install(data: &Path, profile: &Profile, progress: &mut dyn FnMut(Phase, f32)) -> Result<PathBuf> {
     progress(Phase::Resolving, 0.0);
@@ -153,9 +183,9 @@ pub fn install(data: &Path, profile: &Profile, progress: &mut dyn FnMut(Phase, f
         if find_in(&files, &profile.executable).is_none() {
             bail!("{} introuvable dans l'archive téléchargée", profile.executable);
         }
-        // on ne touche à l'ancienne version qu'une fois la nouvelle vérifiée
-        let _ = std::fs::remove_dir_all(&final_dir);
-        std::fs::rename(&files, &final_dir).context("déplacement vers le dossier de l'émulateur")?;
+        // la nouvelle version est vérifiée avant d'être copiée par-dessus l'ancienne (rien n'est supprimé)
+        merge_over(&files, &final_dir).context("copie vers le dossier de l'émulateur")?;
+        std::fs::write(final_dir.join(MARKER), &asset.url)?;
         Ok(())
     })();
     let _ = std::fs::remove_dir_all(&work);

@@ -1,7 +1,7 @@
 name = "Ryujinx"
 platforms = ["switch"]
 extensions = ["nsp", "xci"]
-source = { type = "manual" }
+source = { type = "forge", host = "git.ryujinx.app", repo = "projects/Ryubing" }
 executable = "Ryujinx.exe"
 launch_args = ["-f", "{rom}"]
 save_dirs = ["portable\\bis\\user\\save"]

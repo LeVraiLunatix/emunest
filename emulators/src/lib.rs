@@ -6,6 +6,8 @@ use serde::Deserialize;
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Source {
     Github { repo: String },
+    /// Forge Forgejo / Gitea (API compatible GitHub) : `host` + `repo` (« projects/Ryubing »).
+    Forge { host: String, repo: String },
     Url { url: String },
     /// Pas d'installation automatique : l'utilisateur indique le chemin dans config.toml.
     Manual,
